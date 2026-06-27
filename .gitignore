@@ -3,3 +3,7 @@ clab-*/
 .clab-*/
 *.bak
 *.log
+
+# Python
+__pycache__/
+*.pyc

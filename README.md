@@ -22,35 +22,57 @@ e gli scenari di congestione di
 > capacità (`capacity = 1000`) non vengono limitati in banda: ricevono solo un
 > ritardo via `netem`, così da non introdurre un collo di bottiglia artificiale.
 
-### Cosa è riprodotto a livello di rete
+### Parità con la Fase 1 del simulatore
 
-| Logica del simulatore | Resa in ContainerLab |
-|---|---|
-| Topologie, capacità, ritardi | struttura `veth` + `tbf`/`netem` |
-| Collo di bottiglia | `tbf rate 10mbit` |
-| Coda finita `QueueManager(max_size=20)` → drop-tail | `netem limit 20` come qdisc figlia del `tbf` (drop reali) |
-| 6 scenari di `examples/scenarios.py` | `scenarios.sh` (eventi a tempo) |
-| Classi/priorità (control/telemetry/video) | scenario 6: `htb` a 3 classi + filtri DSCP |
-| Macchina a stati di congestione / compressione | **non** riprodotta (è logica applicativa del simulatore, non di rete) |
+Oltre alle topologie, l'emulatore replica **in tempo reale** i componenti della
+Fase 1 (PDF §4) tramite un control-plane Python (cartella `emulator/`) e un
+agente di traffico nei container (`agent/eds_node.py`):
+
+| Componente Fase 1 (§4) | Nel simulatore | Nell'emulatore |
+|---|---|---|
+| Network Topology + capacità/ritardi | `network/topology.py` | `deploy.sh` (`veth` + `tbf`/`netem`) |
+| Queue Manager (coda finita, drop) | `queue_manager.py` (`max_size=20`) | `netem limit 20` (drop-tail reale), letta da `tc -s qdisc` |
+| Traffic Generator (CBR/Poisson/Bursty/Video/Control/Telemetry) | `traffic/flow.py`, `generator.py` | `agent/eds_node.py` (UDP, stesse formule di inter-arrivo) |
+| Event Scheduler | `scheduler.py` | `RTScheduler` (heap su wall-clock reale) |
+| **Congestion State Machine** (soglie 0.50/0.70/0.85/0.95) | `congestion.py` | `eds_emulator.py` legge l'occupancy reale e applica `DROP_LOW_PRIORITY` via `tc` |
+| Metrics Engine (throughput/PDR/latenza/occupancy/drop/transizioni/fairness) | `metrics.py` | `eds_emulator.py` (misure reali da agente + `tc`) |
+| 6 scenari (§4.5) | `examples/scenarios.py` | `emulator/scenarios.py` (stessi parametri ed eventi) |
+
+> **Compressione/stati intermedi.** Nella Fase 1 gli stati `HEADER/DELTA/INCREMENTAL_COMPRESSION`
+> non alterano il traffico (vedi `core.py`): l'unica azione effettiva è
+> `DROP_LOW_PRIORITY`. L'emulatore riproduce esattamente questo comportamento e
+> conta le transizioni di stato; il `compression_ratio` resta `1.0` come nel
+> simulatore. La compressione *semantica* (Fase 1 §5.1) è logica applicativa e
+> non è in scopo per l'emulatore di rete.
+
+> **Mappatura dei rate.** I rate dei flussi del simulatore (pkt/s) sono mappati
+> 1:1 in Mbit/s (capacità collo di bottiglia 10 → 10 Mbit/s), così i rapporti
+> carico/capacità di ogni scenario restano identici (es. scenario 1: 8+5 vs 10).
 
 ## Prerequisiti
 
 - [Docker](https://docs.docker.com/engine/install/)
 - [ContainerLab](https://containerlab.dev/install/) (comando `containerlab`)
 - Immagine con strumenti di rete `ghcr.io/srl-labs/network-multitool` (contiene
-  `ip`, `tc`, `iperf3`, `ping`, ...); viene scaricata al primo deploy.
+  `ip`, `tc`, `iperf3`, `ping`, **`python3`**); viene scaricata al primo deploy.
+- `python3` sull'host (per il control-plane dell'emulatore — solo stdlib).
 
 ## Struttura del repository
 
 ```
 .
 ├── topologies/
-│   ├── single_bottleneck.clab.yml
+│   ├── single_bottleneck.clab.yml   # include il bind ../agent:/opt/eds
 │   ├── multi_hop.clab.yml
 │   └── mesh.clab.yml
-├── deploy.sh            # deploy + configurazione (IP, routing, tc, drop-tail)
+├── deploy.sh            # deploy + rete: IP, routing, tc (Topology + Queue Manager)
+├── agent/
+│   └── eds_node.py      # Traffic Generator UDP in-container (FlowModel del simulatore)
+├── emulator/
+│   ├── eds_emulator.py  # control-plane: scheduler + state machine + metrics engine
+│   └── scenarios.py     # i 6 scenari della Fase 1 (§4.5)
 ├── run_simulation.sh    # test rapido per topologia (iperf3 / ping)
-├── scenarios.sh         # 6 scenari di congestione EDS (single_bottleneck)
+├── scenarios.sh         # variante "leggera" in bash dei 6 scenari
 ├── .vscode/
 │   └── extensions.json  # estensioni VS Code consigliate
 └── README.md
@@ -61,24 +83,63 @@ e gli scenari di congestione di
 ```bash
 chmod +x deploy.sh run_simulation.sh scenarios.sh
 
-# Deploy + configurazione di una topologia
-./deploy.sh single_bottleneck      # oppure: multi_hop | mesh
+# 1) Deploy della rete (Topology + Queue Manager via tc)
+./deploy.sh single_bottleneck          # oppure: multi_hop | mesh
 
-# Test rapido (latenza + throughput)
+# 2) Emulatore Fase 1: esegue uno dei 6 scenari in tempo reale
+python3 emulator/scenarios.py 1        # ... fino a 6
+python3 emulator/scenarios.py 3 --scale 0.5   # tempi dimezzati per demo rapide
+
+# (in alternativa) test di rete rapido o scenari bash
 ./run_simulation.sh single_bottleneck
-
-# Scenari di congestione EDS 1-6 (solo single_bottleneck)
-./scenarios.sh 1                   # ... fino a 6
+./scenarios.sh 1
 
 # Smontaggio del lab
 ./deploy.sh single_bottleneck destroy
 ```
 
-La dimensione della coda drop-tail è configurabile (default 20 pacchetti):
+Lo scenario 6 usa una coda da 30 pacchetti: il control-plane la imposta da solo
+via `tc`. La dimensione di default (20) è configurabile anche al deploy:
 
 ```bash
-QUEUE_LIMIT=30 ./deploy.sh single_bottleneck   # come lo scenario 6 del sim
+QUEUE_LIMIT=30 ./deploy.sh single_bottleneck
 ```
+
+---
+
+## Emulatore Fase 1 (`emulator/`)
+
+`emulator/scenarios.py` orchestra uno scenario completo sulla topologia
+`single_bottleneck` (come `examples/scenarios.py` del simulatore). Per ogni run:
+
+1. avvia il **ricevitore** UDP sul nodo `dst` (`agent/eds_node.py recv`);
+2. uno **scheduler real-time** fa partire i flussi (`FLOW_START/STOP`), gli
+   eventi di rete (`LINK_RATE_CHANGE`, `LINK_FAILURE/RECOVERY`) e i campioni
+   periodici (`METRIC_SAMPLE`) ai tempi previsti dallo scenario;
+3. i **generatori di traffico** (`eds_node.py send`) inviano UDP riproducendo i
+   `FlowModel` del simulatore e marcano i pacchetti con DSCP per priorità
+   (control `CS6`, telemetry `CS2`, video `AF11`);
+4. un **controller** legge ogni 0.5 s l'occupancy reale della coda da
+   `tc -s qdisc` e fa girare la **Congestion State Machine** (soglie identiche
+   0.50/0.70/0.85/0.95); in stato `DROP_LOW_PRIORITY` installa filtri `tc` che
+   scartano il traffico a priorità > 0 (come il simulatore);
+5. a fine run stampa le **metriche** (throughput, PDR, latenza end-to-end,
+   occupancy media, drop, transizioni di stato, fairness di Jain).
+
+Output di esempio (per riga di `METRIC_SAMPLE` e riepilogo finale):
+
+```
+  [t= 30.0] METRIC  occ= 96.0%  stato=DROP_LOW_PRIORITY      thr=  812.0 pkt/s  drop_tot=134
+  ...
+  Packet Delivery Ratio ........... 78.41%
+  Transizioni stato congestione ... 4
+  Fairness (Jain) ................. 0.812
+```
+
+> **Nota di stato.** Il control-plane è stato verificato a livello di sintassi
+> (`py_compile`, `bash -n`) ma **non ancora eseguito su un lab reale**. Alcuni
+> dettagli `tc` (filtri `action drop` su `tbf`, persistenza dopo `ip link down/up`)
+> vanno confermati al primo deploy: vedi la sezione *Verifica* in fondo.
 
 ---
 
@@ -157,6 +218,10 @@ nel report come datagrammi persi — l'equivalente di `drop_count` nel simulator
 | 5 | `persistent_overload` | 3 flussi, overload sostenuto (load 15) |
 | 6 | `mixed_telemetry_video` | 3 classi con priorità (HTB + DSCP) |
 
+> La variante bash `scenarios.sh` è una demo rapida con `iperf3`. Per la parità
+> fedele con il simulatore (state machine, metriche, FlowModel) usa
+> `python3 emulator/scenarios.py <1-6>`.
+
 ### Scenario 6 — priorità
 
 Lo scenario 6 riconfigura il collo di bottiglia con una qdisc **HTB** a 3 classi
@@ -207,12 +272,19 @@ management del lab.
 
 ---
 
-## Verifica attesa
+## Verifica
 
-- `single_bottleneck`: flussi `iperf3` simultanei verso `dst` condividono circa
-  **10 Mbps** complessivi; in overload UDP compaiono i drop (coda da 20).
-- `multi_hop`: throughput `n0 → n3` limitato a ~10 Mbps e RTT crescente con il
-  numero di hop (3 × ~5 ms per direzione).
+Dopo `./deploy.sh single_bottleneck`:
+
+- **Rete di base** (`scenarios.sh` / `run_simulation.sh`): flussi `iperf3` verso
+  `dst` condividono ~**10 Mbps**; in overload UDP compaiono i drop (coda 20).
+- **Emulatore Fase 1** (`python3 emulator/scenarios.py <1-6>`): le righe
+  `METRIC_SAMPLE` mostrano occupancy e stato della congestione che salgono con
+  il carico; in `DROP_LOW_PRIORITY` il `control` resta consegnato mentre
+  video/telemetry vengono scartati.
+- `multi_hop`: throughput `n0 → n3` ~10 Mbps, RTT crescente con gli hop.
 - `mesh`: throughput `n00 → n12` ~10 Mbps lungo il percorso configurato.
-- `scenarios.sh`: i drop/throughput cambiano in corrispondenza degli eventi a
-  tempo (degrado banda, link down/up, surge, priorità).
+
+Nota: il control-plane Python è validato per sintassi ma non ancora eseguito su
+un lab reale; i comandi `tc` (filtri `action drop` su `tbf`, ripristino dopo
+`ip link down/up`) vanno confermati al primo deploy.
