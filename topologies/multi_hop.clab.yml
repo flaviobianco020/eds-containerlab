@@ -13,6 +13,9 @@ name: multi-hop
 topology:
   defaults:
     kind: linux
+    binds:
+      # agente dell'emulatore (traffic generator UDP) disponibile in /opt/eds
+      - ../agent:/opt/eds:ro
   kinds:
     linux:
       image: ghcr.io/srl-labs/network-multitool:latest
