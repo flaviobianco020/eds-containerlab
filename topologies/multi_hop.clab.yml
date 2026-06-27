@@ -1,0 +1,27 @@
+# multi_hop.clab.yml
+#
+# Topologia "multi hop" del progetto Event-Driven Simulator.
+# Riproduce NetworkTopology.multi_hop() (n_hops=3): catena lineare di 4 nodi.
+#
+#   n0 ══(10 Mbps)══ n1 ══(10 Mbps)══ n2 ══(10 Mbps)══ n3
+#
+# Ogni link è da 10 Mbps (sim: capacity=10). I nodi intermedi n1 e n2
+# inoltrano i pacchetti. Indirizzi, routing e shaping sono applicati da
+# ../deploy.sh.
+name: multi-hop
+
+topology:
+  defaults:
+    kind: linux
+  kinds:
+    linux:
+      image: ghcr.io/srl-labs/network-multitool:latest
+  nodes:
+    n0: {}
+    n1: {}
+    n2: {}
+    n3: {}
+  links:
+    - endpoints: ["n0:eth1", "n1:eth1"]
+    - endpoints: ["n1:eth2", "n2:eth1"]
+    - endpoints: ["n2:eth2", "n3:eth1"]

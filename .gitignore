@@ -1,0 +1,5 @@
+# Artefatti runtime generati da ContainerLab
+clab-*/
+.clab-*/
+*.bak
+*.log

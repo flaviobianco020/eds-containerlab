@@ -1,0 +1,7 @@
+{
+  "recommendations": [
+    "srl-labs.vscode-containerlab",
+    "redhat.vscode-yaml",
+    "ms-azuretools.vscode-docker"
+  ]
+}

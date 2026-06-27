@@ -1,0 +1,34 @@
+# single_bottleneck.clab.yml
+#
+# Topologia "single bottleneck" del progetto Event-Driven Simulator.
+# Riproduce NetworkTopology.single_bottleneck() con 3 sorgenti (usate dagli
+# scenari 5 e 6 di examples/scenarios.py):
+#
+#   src0 ──┐
+#   src1 ──┼── router ════(collo di bottiglia 10 Mbps)════ dst
+#   src2 ──┘
+#
+# I link di accesso src*->router sono ad alta capacità (sim: capacity=1000),
+# il link router->dst è il collo di bottiglia (sim: capacity=10, queue_size=20).
+# Indirizzi, routing e shaping (tc) sono applicati da ../deploy.sh.
+name: single-bottleneck
+
+topology:
+  defaults:
+    kind: linux
+  kinds:
+    linux:
+      image: ghcr.io/srl-labs/network-multitool:latest
+  nodes:
+    src0: {}
+    src1: {}
+    src2: {}
+    router: {}
+    dst: {}
+  links:
+    # link di accesso ad alta capacità
+    - endpoints: ["src0:eth1", "router:eth1"]
+    - endpoints: ["src1:eth1", "router:eth2"]
+    - endpoints: ["src2:eth1", "router:eth3"]
+    # collo di bottiglia
+    - endpoints: ["router:eth4", "dst:eth1"]
