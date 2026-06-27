@@ -405,9 +405,11 @@ def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
         state_prev["sent"] = st["sent_pkts"]
         state_prev["t"] = t
         metrics.samples.append((t, st["occupancy"], sm.current_state.name, thr))
+        # drop relativi all'inizio della run (i contatori tc sono cumulativi dal deploy)
+        drops_run = st["dropped"] - stats0["dropped"]
         print(f"  [t={t:5.1f}] METRIC  occ={st['occupancy']*100:5.1f}%  "
-              f"stato={sm.current_state.name:<22}  thr={thr:7.1f} pkt/s  "
-              f"drop_tot={st['dropped']}")
+              f"stato={sm.current_state.name:<22}  thr={max(thr,0.0):7.1f} pkt/s  "
+              f"drop={drops_run}")
         nt = t + metric_interval
         if nt <= end_time + 1e-6:
             sched.at(nt, _metric_sample, sched)
@@ -427,6 +429,8 @@ def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
     sched.at(metric_interval, _metric_sample, sched)
 
     stats0 = net.qdisc_stats()
+    # allinea il riferimento del throughput allo stato iniziale (contatori tc cumulativi)
+    state_prev["sent"] = stats0["sent_pkts"]
     sched.run(end_time)
 
     # --- chiusura: attende sender/ricevitore -------------------------------
