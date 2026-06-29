@@ -339,8 +339,11 @@ class Net:
         node, iface = self.topo.bottleneck_node, self.topo.bottleneck_if
         # Stato iniziale = 0 (NORMAL)
         self.sh(node, f"echo 0 > {COMP_STATE_FILE}")
-        # Salva la spec COMPLETA della regola, cosi' lo stop la rimuove con match esatto.
+        # Solo pacchetti >= 500 byte (IP totale) passano per NFQUEUE.
+        # I pacchetti CONTROL (100 B payload = 128 B IP) passano direttamente:
+        # riduce il carico sul processo Python userspace di ~90%.
         self._comp_rule = (f"FORWARD -o {iface} -p udp --dport {port} "
+                           f"-m length --length 500:65535 "
                            f"-j NFQUEUE --queue-num {NFQUEUE_NUM} --queue-bypass")
         # rimuove eventuali regole residue da run precedenti, poi aggiunge
         self.sh(node, f"iptables -D {self._comp_rule} 2>/dev/null || true")
