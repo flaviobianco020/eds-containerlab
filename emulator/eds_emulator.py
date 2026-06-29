@@ -297,6 +297,26 @@ class Net:
         if self.verbose:
             print("      [link] collo di bottiglia SU")
 
+    # --- Pulizia stato residuo da run precedenti ----------------------------
+
+    def cleanup_stale(self, port: int = 5000):
+        """
+        Rimuove eventuali artefatti lasciati da run precedenti interrotti:
+          - uccide il processo compressore ancora in vita (causa ENOBUFS sul kernel)
+          - svuota la catena FORWARD (regole NFQUEUE o DROP residue)
+          - rimuove i filtri tc DROP_LOW_PRIORITY
+
+        Chiamata SEMPRE all'inizio di run_emulation, indipendentemente dalla modalita'.
+        Questo evita che una run Phase 2 interrotta blocchi le run Phase 1 successive
+        a causa di una regola NFQUEUE con queue piena (pacchetti droppati da kernel).
+        """
+        node, iface = self.topo.bottleneck_node, self.topo.bottleneck_if
+        self.sh(node,
+                "pid=$(cat /tmp/eds_comp.pid 2>/dev/null); "
+                "[ -n \"$pid\" ] && kill \"$pid\" 2>/dev/null; true")
+        self.sh(node, "iptables -F FORWARD 2>/dev/null || true")
+        self.apply_drop_low_priority(False)
+
     # --- Fase 2: compressore NFQUEUE lato router ----------------------------
 
     def install_compressor_deps(self):
@@ -514,6 +534,7 @@ def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
     print(f"  Topologia: {topo_key}   destinazione: {topo.dst_node} ({topo.dst_ip})")
     print("=" * 70)
     net.preflight()
+    net.cleanup_stale(port=port)
     if queue_limit is not None:
         net.set_queue_limit(queue_limit)
     if enable_phase2:
