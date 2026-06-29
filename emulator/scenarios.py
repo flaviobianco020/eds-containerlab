@@ -35,17 +35,18 @@ from eds_emulator import (  # noqa: E402
 TOPO = "single_bottleneck"
 
 
-def scenario_1(k):
+def scenario_1(k, phase2=False):
     end = 60.0 * k
     flows = [
         FlowSpec(0, "src0", FlowModel.POISSON, 8.0, VIDEO,   0.0, end),
         FlowSpec(1, "src1", FlowModel.CONTROL, 5.0, CONTROL, 0.0, end),
     ]
     return run_emulation(TOPO, flows, [], end, metric_interval=10.0 * k,
+                         enable_phase2=phase2,
                          title="Scenario 1 - Single Bottleneck (load=13 > cap=10)")
 
 
-def scenario_2(k):
+def scenario_2(k, phase2=False):
     end = 80.0 * k
     s20, s50 = 20.0 * k, 50.0 * k
     flows = [
@@ -54,10 +55,11 @@ def scenario_2(k):
         FlowSpec(1, "src1", FlowModel.BURSTY,  6.0, VIDEO,   s20, s50),  # surge
     ]
     return run_emulation(TOPO, flows, [], end, metric_interval=10.0 * k,
+                         enable_phase2=phase2,
                          title="Scenario 2 - Flash Crowd (surge t=20->50)")
 
 
-def scenario_3(k):
+def scenario_3(k, phase2=False):
     end = 80.0 * k
     flows = [
         FlowSpec(0, "src0", FlowModel.POISSON, 7.0, VIDEO,   0.0, end),
@@ -65,10 +67,11 @@ def scenario_3(k):
     ]
     events = [(30.0 * k, "rate", 4.0), (60.0 * k, "rate", 10.0)]
     return run_emulation(TOPO, flows, events, end, metric_interval=10.0 * k,
+                         enable_phase2=phase2,
                          title="Scenario 3 - Bandwidth Degradation (10->4 a t=30, 10 a t=60)")
 
 
-def scenario_4(k):
+def scenario_4(k, phase2=False):
     end = 90.0 * k
     flows = [
         FlowSpec(0, "src0", FlowModel.POISSON, 6.0, VIDEO,   0.0, end),
@@ -76,10 +79,11 @@ def scenario_4(k):
     ]
     events = [(30.0 * k, "down", None), (55.0 * k, "up", None)]
     return run_emulation(TOPO, flows, events, end, metric_interval=10.0 * k,
+                         enable_phase2=phase2,
                          title="Scenario 4 - Link Failure & Recovery (giu' t=30, su t=55)")
 
 
-def scenario_5(k):
+def scenario_5(k, phase2=False):
     end = 100.0 * k
     flows = [
         FlowSpec(0, "src0", FlowModel.POISSON, 7.0, VIDEO,     0.0, end),
@@ -87,10 +91,11 @@ def scenario_5(k):
         FlowSpec(2, "src2", FlowModel.CONTROL, 3.0, CONTROL,   0.0, end),
     ]
     return run_emulation(TOPO, flows, [], end, metric_interval=10.0 * k,
+                         enable_phase2=phase2,
                          title="Scenario 5 - Persistent Overload (load=15 >> cap=10)")
 
 
-def scenario_6(k):
+def scenario_6(k, phase2=False):
     end = 80.0 * k
     flows = [
         FlowSpec(0, "src0", FlowModel.VIDEO,              5.0, VIDEO,     0.0, end),
@@ -99,6 +104,7 @@ def scenario_6(k):
     ]
     # queue_size=30 come nello scenario 6 del simulatore
     return run_emulation(TOPO, flows, [], end, metric_interval=10.0 * k, queue_limit=30,
+                         enable_phase2=phase2,
                          title="Scenario 6 - Mixed Telemetry & Video (control protetto)")
 
 
@@ -114,13 +120,14 @@ def main():
         sys.exit(1)
     which = sys.argv[1]
     scale = 1.0
+    phase2 = "--phase2" in sys.argv
     if "--scale" in sys.argv:
         try:
             scale = float(sys.argv[sys.argv.index("--scale") + 1])
         except (IndexError, ValueError):
             print("--scale richiede un numero (es. --scale 0.5)")
             sys.exit(1)
-    SCENARIOS[which](scale)
+    SCENARIOS[which](scale, phase2=phase2)
 
 
 if __name__ == "__main__":

@@ -34,7 +34,10 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Callable, Optional
 
-AGENT_PATH = "/opt/eds/eds_node.py"
+AGENT_PATH      = "/opt/eds/eds_node.py"
+COMPRESSOR_PATH = "/opt/eds/eds_compressor.py"
+COMP_STATE_FILE = "/tmp/eds_comp_state"
+NFQUEUE_NUM     = 1
 
 # ----------------------- Traffic classes / FlowModel ------------------------
 # Rispecchiano le classi usate in examples/scenarios.py del simulatore.
@@ -76,12 +79,39 @@ DEFAULT_THRESHOLDS = {
     CongestionState.DROP_LOW_PRIORITY: 0.95,
 }
 
+# Fase 2 (eFRAC paper §3.3) — identici a simulator/network/congestion.py
+PHASE2_EWMA_ALPHA: float = 0.125           # Jacobson/Karn α
+PHASE2_ESCALATION_DEBOUNCE: float = 1.5   # secondi di eccedenza sostenuta prima di salire
+PHASE2_DEESCALATION_COOLDOWN: float = 4.5 # secondi sotto soglia prima di scendere (3:1)
+
 
 class CongestionStateMachine:
-    def __init__(self, thresholds=None):
+    """
+    Fase 1 (default): transizioni istantanee, nessuno smoothing — backward-compatible.
+    Fase 2 (enable_phase2=True): EWMA α=1/8 + hysteresis asimmetrica (eFRAC §3.3).
+
+    Identica a simulator/network/congestion.py.
+    """
+
+    def __init__(self, thresholds=None,
+                 ewma_alpha: float = 1.0,
+                 escalation_debounce: float = 0.0,
+                 deescalation_cooldown: float = 0.0):
         self.current_state = CongestionState.NORMAL
         self.thresholds = dict(thresholds or DEFAULT_THRESHOLDS)
         self.transitions = 0
+        # EWMA
+        self._alpha = ewma_alpha
+        self._ewma: float = 0.0
+        # Hysteresis
+        self._escalation_debounce = escalation_debounce
+        self._deescalation_cooldown = deescalation_cooldown
+        self._escalate_since: Optional[float] = None
+        self._deescalate_since: Optional[float] = None
+
+    @property
+    def ewma_occupancy(self) -> float:
+        return self._ewma
 
     def evaluate(self, occupancy: float) -> CongestionState:
         result = CongestionState.NORMAL
@@ -95,14 +125,70 @@ class CongestionStateMachine:
                 result = state
         return result
 
-    def update(self, occupancy: float) -> bool:
-        new_state = self.evaluate(occupancy)
+    def _transition(self, new_state: CongestionState) -> bool:
         if new_state != self.current_state:
             self.current_state = new_state
             self.transitions += 1
             return True
         return False
 
+    def update(self, occupancy: float, sim_time: float = 0.0) -> bool:
+        """
+        Fase 1 (alpha=1.0, debounce=0.0): salto istantaneo al target, nessuno smoothing.
+        Fase 2: EWMA + un passo alla volta con debounce/cooldown asimmetrici.
+        """
+        self._ewma = (1.0 - self._alpha) * self._ewma + self._alpha * occupancy
+        target = self.evaluate(self._ewma)
+
+        if target.value > self.current_state.value:
+            if self._escalation_debounce <= 0.0:
+                self._escalate_since = None
+                self._deescalate_since = None
+                return self._transition(target)
+            if self._escalate_since is None:
+                self._escalate_since = sim_time
+            self._deescalate_since = None
+            if sim_time - self._escalate_since >= self._escalation_debounce:
+                next_s = CongestionState(self.current_state.value + 1)
+                self._escalate_since = None
+                return self._transition(next_s)
+            return False
+
+        elif target.value < self.current_state.value:
+            if self._deescalation_cooldown <= 0.0:
+                self._escalate_since = None
+                self._deescalate_since = None
+                return self._transition(target)
+            if self._deescalate_since is None:
+                self._deescalate_since = sim_time
+            self._escalate_since = None
+            if sim_time - self._deescalate_since >= self._deescalation_cooldown:
+                prev_s = CongestionState(self.current_state.value - 1)
+                self._deescalate_since = None
+                return self._transition(prev_s)
+            return False
+
+        else:
+            self._escalate_since = None
+            self._deescalate_since = None
+            return False
+
+
+# Ratio attese per stato (media pesata sui tre traffic class del simulatore).
+# Usate per stimare il compression_ratio nelle metriche quando enable_phase2=True.
+# Fonte: simulator/control/compressor.py _RATIOS, media (pri=0, pri=1, pri=2).
+#   NORMAL        : 1.00
+#   HC            : media(0.760,0.904,0.983) = 0.882 → ratio=1/0.882≈1.13
+#   DELTA         : media(0.550,0.500,0.667) = 0.572 → ratio=1/0.572≈1.75
+#   INCREMENTAL   : media(0.500,0.250,0.667) = 0.472 → ratio=1/0.472≈2.12
+#   DROP          : solo CONTROL sopravvive → ratio conservativa ≈ 1.0
+_EXPECTED_COMPRESSION_RATIO: dict[str, float] = {
+    "NORMAL":                  1.00,
+    "HEADER_COMPRESSION":      1.13,
+    "DELTA_COMPRESSION":       1.75,
+    "INCREMENTAL_COMPRESSION": 2.12,
+    "DROP_LOW_PRIORITY":       1.00,
+}
 
 # --------------------------------- Topologie --------------------------------
 @dataclass
@@ -210,6 +296,74 @@ class Net:
         if self.verbose:
             print("      [link] collo di bottiglia SU")
 
+    # --- Fase 2: compressore NFQUEUE lato router ----------------------------
+
+    def install_compressor_deps(self):
+        """
+        Installa libnetfilter_queue + NetfilterQueue Python nel container router.
+        Chiamata una volta sola all'avvio dello scenario con enable_phase2=True.
+        """
+        node = self.topo.bottleneck_node
+        print(f"  [compressor] installazione dipendenze in {node} ...")
+        # Alpine: libnetfilter_queue + libmnl (runtime)
+        self.sh(node,
+                "apk add --no-cache libnetfilter_queue libmnl 2>&1 | tail -1",
+                timeout=60.0)
+        # NetfilterQueue wheel (compilato, richiede libnetfilter_queue-dev in build)
+        r = self.sh(node,
+                    "pip3 install --quiet --break-system-packages NetfilterQueue 2>&1 || "
+                    "pip3 install --quiet NetfilterQueue 2>&1",
+                    timeout=120.0)
+        last = (r.stdout or "").strip().splitlines()
+        if last:
+            print(f"      [pip] {last[-1]}")
+
+    def start_compressor(self, port: int = 5000):
+        """
+        Aggiunge la regola iptables NFQUEUE sul link bottleneck e avvia
+        eds_compressor.py in background nel container router.
+
+        La regola intercetta solo UDP verso la porta del ricevitore (EDS_PORT)
+        in transito sull'interfaccia di uscita del collo di bottiglia.
+        --queue-bypass: se il processo crasha, i pacchetti passano non compressi
+        invece di essere scartati (fail-open per robustezza).
+        """
+        node, iface = self.topo.bottleneck_node, self.topo.bottleneck_if
+        # Stato iniziale = 0 (NORMAL)
+        self.sh(node, f"echo 0 > {COMP_STATE_FILE}")
+        # Regola iptables: FORWARD in uscita sul bottleneck → NFQUEUE
+        self.sh(node,
+                f"iptables -A FORWARD -o {iface} -p udp --dport {port} "
+                f"-j NFQUEUE --queue-num {NFQUEUE_NUM} --queue-bypass")
+        # Avvia compressore in background, log in /tmp/eds_comp.log
+        self.sh(node,
+                f"python3 {COMPRESSOR_PATH} {NFQUEUE_NUM} "
+                f"> /tmp/eds_comp.log 2>&1 & echo $! > /tmp/eds_comp.pid")
+        time.sleep(0.8)  # attendi avvio processo
+        if self.verbose:
+            r = self.sh(node, "cat /tmp/eds_comp.log")
+            print(f"      [compressor] {(r.stdout or '').strip()}")
+
+    def update_compression_state(self, state_value: int):
+        """
+        Scrive il valore di stato (0-4) nel file letto dal compressore.
+        Chiamata dal controller tick ad ogni transizione di stato.
+        """
+        self.sh(self.topo.bottleneck_node,
+                f"echo {state_value} > {COMP_STATE_FILE}")
+
+    def stop_compressor(self):
+        """Rimuove la regola iptables e termina il processo compressore."""
+        node, iface = self.topo.bottleneck_node, self.topo.bottleneck_if
+        self.sh(node,
+                f"iptables -D FORWARD -o {iface} -p udp "
+                f"-j NFQUEUE --queue-num {NFQUEUE_NUM} 2>/dev/null || true")
+        self.sh(node,
+                "pid=$(cat /tmp/eds_comp.pid 2>/dev/null); "
+                "[ -n \"$pid\" ] && kill $pid 2>/dev/null || true")
+        if self.verbose:
+            print("      [compressor] fermato, regola iptables rimossa")
+
     def apply_drop_low_priority(self, active: bool):
         """Aggiunge/rimuove i filtri tc che scartano il traffico a bassa priorita'."""
         node, iface = self.topo.bottleneck_node, self.topo.bottleneck_if
@@ -290,6 +444,30 @@ class Metrics:
     def __init__(self):
         self.samples = []          # (t, occupancy, state, throughput_pps)
         self.transitions = 0
+        # tracking tempo per stato (Fase 2: stima compression_ratio)
+        self._state_time: dict[str, float] = {s.name: 0.0 for s in CongestionState}
+        self._state_enter_t: float = 0.0
+        self._last_state: str = CongestionState.NORMAL.name
+
+    def record_state_time(self, new_state_name: str, now: float) -> None:
+        """Chiude il timer dello stato precedente, apre quello del nuovo."""
+        self._state_time[self._last_state] += now - self._state_enter_t
+        self._state_enter_t = now
+        self._last_state = new_state_name
+
+    def close_state_time(self, end_t: float) -> None:
+        """Chiude il timer dello stato corrente alla fine della simulazione."""
+        self._state_time[self._last_state] += end_t - self._state_enter_t
+
+    def compression_ratio(self) -> float:
+        """Stima il compression_ratio come media pesata sul tempo per stato."""
+        total = sum(self._state_time.values())
+        if total <= 0.0:
+            return 1.0
+        return sum(
+            self._state_time[s] * _EXPECTED_COMPRESSION_RATIO[s]
+            for s in self._state_time
+        ) / total
 
     def jain(self, values) -> float:
         vals = [v for v in values if v is not None]
@@ -305,7 +483,8 @@ class Metrics:
 def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
                   end_time: float, metric_interval: float = 10.0,
                   tick: float = 0.5, seed: int = 42, port: int = 5000,
-                  title: str = "", queue_limit: Optional[int] = None) -> dict:
+                  title: str = "", queue_limit: Optional[int] = None,
+                  enable_phase2: bool = False) -> dict:
     """
     Esegue uno scenario completo:
       - avvia il ricevitore sul nodo destinazione,
@@ -325,8 +504,22 @@ def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
     net.preflight()
     if queue_limit is not None:
         net.set_queue_limit(queue_limit)
+    if enable_phase2:
+        net.install_compressor_deps()
+        net.start_compressor(port=port)
 
-    sm = CongestionStateMachine()
+    if enable_phase2:
+        sm = CongestionStateMachine(
+            ewma_alpha=PHASE2_EWMA_ALPHA,
+            escalation_debounce=PHASE2_ESCALATION_DEBOUNCE,
+            deescalation_cooldown=PHASE2_DEESCALATION_COOLDOWN,
+        )
+        print(f"  Modalità: FASE 2  (EWMA α={PHASE2_EWMA_ALPHA}, "
+              f"escalation={PHASE2_ESCALATION_DEBOUNCE}s, "
+              f"cooldown={PHASE2_DEESCALATION_COOLDOWN}s)")
+    else:
+        sm = CongestionStateMachine()
+        print("  Modalità: FASE 1  (transizioni istantanee)")
     metrics = Metrics()
     results = {"send": [], "recv": None}
     threads: list[threading.Thread] = []
@@ -385,12 +578,18 @@ def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
 
     # --- controller (congestion state machine) -----------------------------
     def _controller_tick(sched: RTScheduler):
+        now = sched.now()
         st = net.qdisc_stats()
-        changed = sm.update(st["occupancy"])
+        changed = sm.update(st["occupancy"], sim_time=now)
         if changed:
             metrics.transitions += 1
+            metrics.record_state_time(sm.current_state.name, now)
+            print(f"  [t={now:5.1f}] STATO -> {sm.current_state.name}  "
+                  f"(EWMA occ={sm.ewma_occupancy*100:.1f}%)")
+            if enable_phase2:
+                net.update_compression_state(sm.current_state.value)
         net.apply_drop_low_priority(sm.current_state == CongestionState.DROP_LOW_PRIORITY)
-        nt = sched.now() + tick
+        nt = now + tick
         if nt <= end_time:
             sched.at(nt, _controller_tick, sched)
 
@@ -431,14 +630,18 @@ def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
     stats0 = net.qdisc_stats()
     # allinea il riferimento del throughput allo stato iniziale (contatori tc cumulativi)
     state_prev["sent"] = stats0["sent_pkts"]
+    metrics._state_enter_t = 0.0  # il run inizia a t=0
     sched.run(end_time)
 
     # --- chiusura: attende sender/ricevitore -------------------------------
     print("  ... attendo la chiusura di sender e ricevitore ...")
     for th in threads:
         th.join(timeout=40)
-    net.apply_drop_low_priority(False)  # ripulisce i filtri
+    if enable_phase2:
+        net.stop_compressor()
+    net.apply_drop_low_priority(False)  # ripulisce i filtri tc
     stats1 = net.qdisc_stats()
+    metrics.close_state_time(end_time)
 
     return _summarize(topo, flows, results, metrics, stats0, stats1, end_time)
 
@@ -458,6 +661,7 @@ def _parse_json(text: str) -> Optional[dict]:
 
 def _summarize(topo, flows, results, metrics, stats0, stats1, end_time) -> dict:
     sent_total = sum(s.get("sent", 0) for s in results["send"])
+    bytes_sent_total = sum(s.get("bytes", 0) for s in results["send"])
     recv = results.get("recv") or {"flows": {}}
     recv_flows = recv.get("flows", {})
     recv_total = sum(f.get("recv", 0) for f in recv_flows.values())
@@ -472,6 +676,16 @@ def _summarize(topo, flows, results, metrics, stats0, stats1, end_time) -> dict:
     drops = stats1["dropped"] - stats0["dropped"]
     occ_avg = (sum(s[1] for s in metrics.samples) / len(metrics.samples)
                if metrics.samples else 0.0)
+
+    # Compression ratio reale da byte misurati.
+    # avg_orig_size = dimensione originale media per pacchetto (lato sender, pre-compressione).
+    # bytes_total = byte effettivamente ricevuti (post-compressione sul link bottleneck).
+    # ratio = (orig_per_pkt × pkt_consegnati) / byte_ricevuti  →  > 1.0 se compressione attiva.
+    avg_orig_size = bytes_sent_total / sent_total if sent_total else 0.0
+    if bytes_total > 0 and avg_orig_size > 0:
+        real_compression_ratio = (avg_orig_size * recv_total) / bytes_total
+    else:
+        real_compression_ratio = metrics.compression_ratio()
 
     # fairness (Jain) sul throughput per-flusso
     per_flow_thr = {str(fid): 0 for fid in (f.fid for f in flows)}
@@ -490,7 +704,8 @@ def _summarize(topo, flows, results, metrics, stats0, stats1, end_time) -> dict:
         "drop_count": drops,
         "congestion_state_transitions": metrics.transitions,
         "fairness_jain": round(fairness, 4),
-        "compression_ratio": 1.0,  # placeholder, come nel simulatore (Fase 1)
+        "compression_ratio": round(real_compression_ratio, 3),
+        "state_time_s": {k: round(v, 2) for k, v in metrics._state_time.items()},
     }
 
     print("-" * 70)
@@ -506,5 +721,9 @@ def _summarize(topo, flows, results, metrics, stats0, stats1, end_time) -> dict:
     print(f"  Drop totali (coda) .............. {summary['drop_count']}")
     print(f"  Transizioni stato congestione ... {summary['congestion_state_transitions']}")
     print(f"  Fairness (Jain) ................. {summary['fairness_jain']:.3f}")
+    print(f"  Compression ratio (reale, byte) . {summary['compression_ratio']:.3f}x")
+    st_line = "  ".join(f"{k[:4]}={v:.1f}s" for k, v in summary["state_time_s"].items() if v > 0)
+    if st_line:
+        print(f"  Tempo per stato ................. {st_line}")
     print("-" * 70)
     return summary
