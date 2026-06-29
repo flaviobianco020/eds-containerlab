@@ -220,6 +220,7 @@ class Net:
         self.topo = topo
         self.verbose = verbose
         self._drop_active = False
+        self._comp_rule = None   # spec esatta della regola iptables NFQUEUE
 
     def container(self, node: str) -> str:
         return f"clab-{self.topo.lab}-{node}"
@@ -305,18 +306,25 @@ class Net:
         """
         node = self.topo.bottleneck_node
         print(f"  [compressor] installazione dipendenze in {node} ...")
-        # Alpine: libnetfilter_queue + libmnl (runtime)
+        # Alpine: toolchain di build + header dev + runtime libs + pip
         self.sh(node,
-                "apk add --no-cache libnetfilter_queue libmnl 2>&1 | tail -1",
-                timeout=60.0)
-        # NetfilterQueue wheel (compilato, richiede libnetfilter_queue-dev in build)
+                "apk add --no-cache gcc musl-dev python3-dev py3-pip linux-headers "
+                "libnetfilter_queue libnetfilter_queue-dev libmnl libmnl-dev 2>&1 | tail -1",
+                timeout=180.0)
+        # NetfilterQueue (estensione C, compilata da sorgente)
         r = self.sh(node,
-                    "pip3 install --quiet --break-system-packages NetfilterQueue 2>&1 || "
-                    "pip3 install --quiet NetfilterQueue 2>&1",
-                    timeout=120.0)
+                    "python3 -m pip install --break-system-packages -q NetfilterQueue 2>&1 || "
+                    "python3 -m pip install -q NetfilterQueue 2>&1",
+                    timeout=180.0)
         last = (r.stdout or "").strip().splitlines()
         if last:
             print(f"      [pip] {last[-1]}")
+        # verifica che l'import funzioni davvero (fallisce subito se manca qualcosa)
+        chk = self.sh(node, "python3 -c 'import netfilterqueue' 2>&1")
+        if chk.returncode != 0:
+            raise RuntimeError("NetfilterQueue non importabile nel router: "
+                               + (chk.stdout or "").strip())
+        print("      [compressor] NetfilterQueue pronto")
 
     def start_compressor(self, port: int = 5000):
         """
@@ -331,10 +339,12 @@ class Net:
         node, iface = self.topo.bottleneck_node, self.topo.bottleneck_if
         # Stato iniziale = 0 (NORMAL)
         self.sh(node, f"echo 0 > {COMP_STATE_FILE}")
-        # Regola iptables: FORWARD in uscita sul bottleneck → NFQUEUE
-        self.sh(node,
-                f"iptables -A FORWARD -o {iface} -p udp --dport {port} "
-                f"-j NFQUEUE --queue-num {NFQUEUE_NUM} --queue-bypass")
+        # Salva la spec COMPLETA della regola, cosi' lo stop la rimuove con match esatto.
+        self._comp_rule = (f"FORWARD -o {iface} -p udp --dport {port} "
+                           f"-j NFQUEUE --queue-num {NFQUEUE_NUM} --queue-bypass")
+        # rimuove eventuali regole residue da run precedenti, poi aggiunge
+        self.sh(node, f"iptables -D {self._comp_rule} 2>/dev/null || true")
+        self.sh(node, f"iptables -A {self._comp_rule}")
         # Avvia compressore in background, log in /tmp/eds_comp.log
         self.sh(node,
                 f"python3 {COMPRESSOR_PATH} {NFQUEUE_NUM} "
@@ -353,11 +363,10 @@ class Net:
                 f"echo {state_value} > {COMP_STATE_FILE}")
 
     def stop_compressor(self):
-        """Rimuove la regola iptables e termina il processo compressore."""
-        node, iface = self.topo.bottleneck_node, self.topo.bottleneck_if
-        self.sh(node,
-                f"iptables -D FORWARD -o {iface} -p udp "
-                f"-j NFQUEUE --queue-num {NFQUEUE_NUM} 2>/dev/null || true")
+        """Rimuove la regola iptables (match esatto) e termina il compressore."""
+        node = self.topo.bottleneck_node
+        if self._comp_rule:
+            self.sh(node, f"iptables -D {self._comp_rule} 2>/dev/null || true")
         self.sh(node,
                 "pid=$(cat /tmp/eds_comp.pid 2>/dev/null); "
                 "[ -n \"$pid\" ] && kill $pid 2>/dev/null || true")
