@@ -154,6 +154,24 @@ python3 examples/train_mappo.py --episodes 4000 --stability-penalty 0.1
 # → produce checkpoints/mappo_best_stab.json
 ```
 
+### Confronto automatico dei tre controller
+
+`emulator/benchmark.py` esegue i tre controller su tutti gli scenari **sullo
+stesso ferro**, rieseguendo `deploy.sh` fra un run e l'altro per partire sempre
+da uno stato `tc` pulito, e stampa la tabella comparativa dei KPI (media su più
+ripetizioni, perché l'emulatore ha rumore reale).
+
+```bash
+python3 emulator/benchmark.py \
+    --mappo-ckpt ../Event-Driven_Simulator/checkpoints/mappo_best_stab.json \
+    --scale 0.5                 # tempi dimezzati per uno sweep più rapido
+
+# solo alcuni scenari, due ripetizioni, con CSV:
+python3 emulator/benchmark.py --scenarios 1,3,5 --repeats 2 \
+    --mappo-ckpt ../Event-Driven_Simulator/checkpoints/mappo_best_stab.json \
+    --out logs/benchmark.csv
+```
+
 ---
 
 ## Emulatore Fase 1 (`emulator/`)
