@@ -141,6 +141,24 @@ Fase 2.
 - A ogni secondo il control-plane costruisce l'osservazione a 7 feature dalle
   statistiche `tc` reali e dal mix di traffico offerto, interroga l'Actor e
   applica `ESCALATE / MAINTAIN / DE-ESCALATE`.
+- I checkpoint robusti possono dichiarare `meta.min_state_dwell`. Durante
+  questo intervallo l'emulatore applica la stessa **action mask** del
+  simulatore: normalmente è permesso solo `MAINTAIN`; con occupancy grezza
+  almeno pari al 95% rimane consentito anche `ESCALATE`. Questo impedisce
+  oscillazioni rapide senza bloccare la risposta alle emergenze.
+
+Per salvare le osservazioni, le probabilità, la maschera e l'azione realmente
+usate durante un run:
+
+```bash
+python3 emulator/scenarios.py 3 \
+    --mappo /path/to/mappo_best_stab_emulator_aligned_stress_rho7.json \
+    --mappo-trace logs/alignment_trace_emu_s3.json
+```
+
+La traccia usa lo schema `eds-mappo-observation-trace-v1` ed è confrontabile
+con quella prodotta dal simulatore, così lo scarto sim-to-real può essere
+misurato feature per feature invece di essere dedotto soltanto dai KPI finali.
 
 **Scarto sim-to-real:** due delle sette feature (frazione di pacchetti ad alta
 e bassa priorità in coda) non sono ispezionabili via `tc` sull'emulatore e

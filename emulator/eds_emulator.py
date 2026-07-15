@@ -51,6 +51,22 @@ NFQUEUE_NUM     = 1
 MAPPO_DT          = 1.0    # cadenza di decisione della policy: 1 s (== env.DT)
 MAPPO_T_MAX_STATE = 30.0   # normalizzazione t_stato/T_max (doc Tabella 7)
 MAPPO_CAP_BPS     = 10e6   # capacita' nominale del collo di bottiglia (10 Mbit/s)
+MAPPO_EMERGENCY_OCCUPANCY = 0.95
+MAPPO_ACTION_NAMES = ("ESCALATE", "MAINTAIN", "DEESCALATE")
+MAPPO_TRACE_FEATURES = (
+    "ewma_occupancy", "congestion_state", "high_priority_ratio",
+    "low_priority_ratio", "drop_rate", "link_utilisation", "time_in_state",
+)
+
+
+def mappo_action_mask(now: float, last_transition: float,
+                      min_state_dwell: float, occupancy: float) -> list[bool]:
+    """Vincolo di deploy identico al simulatore robusto."""
+    if min_state_dwell <= 0.0 or now - last_transition >= min_state_dwell:
+        return [True, True, True]
+    if occupancy >= MAPPO_EMERGENCY_OCCUPANCY:
+        return [True, True, False]
+    return [False, True, False]
 
 # ----------------------- Traffic classes / FlowModel ------------------------
 # Rispecchiano le classi usate in examples/scenarios.py del simulatore.
@@ -558,7 +574,8 @@ def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
                   tick: float = 0.5, seed: int = 42, port: int = 5000,
                   title: str = "", queue_limit: Optional[int] = None,
                   enable_phase2: bool = False,
-                  mappo_ckpt: Optional[str] = None) -> dict:
+                  mappo_ckpt: Optional[str] = None,
+                  mappo_trace_path: Optional[str] = None) -> dict:
     """
     Esegue uno scenario completo:
       - avvia il ricevitore sul nodo destinazione,
@@ -582,9 +599,13 @@ def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
 
     mappo_mode = mappo_ckpt is not None
     actor = None
+    min_state_dwell = 0.0
+    mappo_trace_rows = []
     if mappo_mode:
         from eds_actor import Actor as MappoActor  # import pigro (solo se serve)
         actor = MappoActor.from_checkpoint(mappo_ckpt)
+        min_state_dwell = float(getattr(actor, "meta", {}).get(
+            "min_state_dwell", 0.0))
 
     # La Fase 2 e la Fase 3 usano la stessa infrastruttura di compressione
     # (middlebox NFQUEUE): cambia solo CHI decide lo stato. In Fase 3 e' l'Actor.
@@ -600,7 +621,8 @@ def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
         print(f"  Modalità: FASE 3  (MAPPO — policy appresa pilota la macchina di stato)")
         print(f"  checkpoint: {os.path.basename(mappo_ckpt)}  "
               f"(episodio {meta.get('episode','?')}, "
-              f"λ_stab={meta.get('stability_penalty', 0.0)})")
+              f"λ_stab={meta.get('stability_penalty', 0.0)}, "
+              f"dwell={min_state_dwell:.1f}s)")
     elif enable_phase2:
         sm = CongestionStateMachine(
             ewma_alpha=PHASE2_EWMA_ALPHA,
@@ -723,7 +745,10 @@ def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
             link_util,                               # utilizzo link
             t_in_state,                              # t_stato / T_max
         ]
-        action = actor.act(obs)
+        action_mask = mappo_action_mask(
+            now, mstate["last_transition"], min_state_dwell, st["occupancy"])
+        action_probs = actor.probs(obs, action_mask=action_mask)
+        action = actor.act(obs, action_mask=action_mask)
 
         cur = sm.current_state.value
         if action == 0:      # ESCALATE
@@ -742,6 +767,16 @@ def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
             print(f"  [t={now:5.1f}] MAPPO -> {sm.current_state.name}  "
                   f"(occ={st['occupancy']*100:.0f}% ewma={mstate['ewma']*100:.0f}% "
                   f"util={link_util*100:.0f}%)")
+        if mappo_trace_path:
+            mappo_trace_rows.append({
+                "t": now,
+                "observation": dict(zip(MAPPO_TRACE_FEATURES, obs)),
+                "action": MAPPO_ACTION_NAMES[action],
+                "action_id": action,
+                "action_probabilities": action_probs,
+                "action_mask": action_mask,
+                "state_after": sm.current_state.value,
+            })
         net.apply_drop_low_priority(sm.current_state == CongestionState.DROP_LOW_PRIORITY)
         nt = now + MAPPO_DT
         if nt <= end_time:
@@ -806,6 +841,19 @@ def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
     net.apply_drop_low_priority(False)  # ripulisce i filtri tc
     stats1 = net.qdisc_stats()
     metrics.close_state_time(end_time)
+
+    if mappo_mode and mappo_trace_path:
+        trace_dir = os.path.dirname(os.path.abspath(mappo_trace_path))
+        os.makedirs(trace_dir, exist_ok=True)
+        with open(mappo_trace_path, "w") as fh:
+            json.dump({
+                "schema": "eds-mappo-observation-trace-v1",
+                "features": list(MAPPO_TRACE_FEATURES),
+                "checkpoint": os.path.abspath(mappo_ckpt),
+                "min_state_dwell": min_state_dwell,
+                "rows": mappo_trace_rows,
+            }, fh, indent=2)
+        print(f"  traccia MAPPO salvata: {os.path.abspath(mappo_trace_path)}")
 
     return _summarize(topo, flows, results, metrics, stats0, stats1, end_time)
 
