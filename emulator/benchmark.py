@@ -178,13 +178,18 @@ def main() -> None:
             if samples:
                 raw[(which, mode)] = samples
 
-    # ---- media per (scenario, modo) --------------------------------------
-    def avg(which, mode, key):
+    # ---- media e deviazione standard per (scenario, modo) ----------------
+    def _vals(which, mode, key):
         s = raw.get((which, mode))
-        if not s:
-            return None
-        vals = [d[key] for d in s if d.get(key) is not None]
+        return [d[key] for d in s if d.get(key) is not None] if s else []
+
+    def avg(which, mode, key):
+        vals = _vals(which, mode, key)
         return statistics.fmean(vals) if vals else None
+
+    def std(which, mode, key):
+        vals = _vals(which, mode, key)
+        return statistics.pstdev(vals) if len(vals) > 1 else 0.0
 
     print("\n" + "=" * 78)
     print(f"  RISULTATI  (media su {args.repeats} ripetizione/i)")
@@ -212,6 +217,21 @@ def main() -> None:
             cells.append(_fmt(k, u, statistics.fmean(per_scen) if per_scen else None))
         print(f"    {MODE_LABEL[mode]:<10}" + "".join(f"{c:>10}" for c in cells))
     print("=" * 78)
+
+    # ---- incertezza (± dev. std) quando ci sono piu' ripetizioni ----------
+    if args.repeats > 1:
+        print(f"\n  INCERTEZZA  (media ± dev. std su {args.repeats} ripetizioni)")
+        print(f"    {'scenario':<22}{'controller':<10}{'PDR':>16}{'compr':>16}")
+        for which in which_list:
+            for mode in modes:
+                if (which, mode) not in raw:
+                    continue
+                pm, ps = avg(which, mode, "packet_delivery_ratio"), std(which, mode, "packet_delivery_ratio")
+                cm, cs = avg(which, mode, "compression_ratio"), std(which, mode, "compression_ratio")
+                print(f"    {SCEN_NAMES.get(which,'?'):<22}{MODE_LABEL[mode]:<10}"
+                      f"{pm*100:8.1f}% ±{ps*100:4.1f}{cm:9.2f}x ±{cs:4.2f}")
+        print("=" * 78)
+
     print(f"  Completato in {time.time()-t0:.0f}s")
 
     # ---- CSV opzionale ----------------------------------------------------
