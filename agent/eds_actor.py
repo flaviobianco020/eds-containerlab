@@ -92,17 +92,28 @@ class Actor:
         z3 = _matvec(h2, self.W3, self.n_out)
         return [b + z for b, z in zip(self.b3, z3)]
 
-    def probs(self, obs):
-        """Softmax stabile sui logits (per logging/diagnostica)."""
-        lg = self.logits(obs)
+    @staticmethod
+    def _masked_logits(logits, action_mask=None):
+        if action_mask is None:
+            return logits
+        if len(action_mask) != len(logits):
+            raise ValueError("action_mask incompatibile con il numero di azioni")
+        if not any(action_mask):
+            raise ValueError("action_mask deve consentire almeno un'azione")
+        return [v if allowed else -1e30
+                for v, allowed in zip(logits, action_mask)]
+
+    def probs(self, obs, action_mask=None):
+        """Softmax stabile, eventualmente limitata alle azioni consentite."""
+        lg = self._masked_logits(self.logits(obs), action_mask)
         m = max(lg)
         e = [math.exp(v - m) for v in lg]
         s = sum(e)
         return [v / s for v in e]
 
-    def act(self, obs) -> int:
+    def act(self, obs, action_mask=None) -> int:
         """Azione deterministica: argmax dei logits (== argmax softmax)."""
-        lg = self.logits(obs)
+        lg = self._masked_logits(self.logits(obs), action_mask)
         best_i, best_v = 0, lg[0]
         for i in range(1, len(lg)):
             if lg[i] > best_v:
