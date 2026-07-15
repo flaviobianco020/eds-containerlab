@@ -11,7 +11,7 @@ Prerequisito:
     ./deploy.sh single_bottleneck
 
 Uso:
-    python3 emulator/scenarios.py <1-6> [--scale 0.5]
+    python3 emulator/scenarios.py <1-6> [--scale 0.5] [--phase2 | --mappo CKPT]
 
     1  single_bottleneck      - overload di base (load 13 > cap 10)
     2  flash_crowd            - flusso surge bursty da t=20 a t=50
@@ -19,6 +19,14 @@ Uso:
     4  link_failure_recovery  - link giu' a t=30, su a t=55
     5  persistent_overload    - 3 flussi, overload sostenuto (load 15)
     6  mixed_telemetry_video  - 3 classi con priorita' (control protetto)
+
+Modalita' di controllo (alternative):
+    (nessuna)        FASE 1 - transizioni di stato istantanee sull'occupancy
+    --phase2         FASE 2 - EWMA + isteresi (eFRAC) + compressore NFQUEUE
+    --mappo CKPT     FASE 3 - la policy MAPPO addestrata pilota la macchina di
+                     stato; CKPT e' il checkpoint JSON prodotto nel simulatore
+                     (es. checkpoints/mappo_best_stab.json). Usa lo stesso
+                     compressore NFQUEUE della Fase 2: cambia solo il "cervello".
 
 --scale moltiplica tutti i tempi (per demo piu' rapide; default 1.0).
 """
@@ -35,18 +43,18 @@ from eds_emulator import (  # noqa: E402
 TOPO = "single_bottleneck"
 
 
-def scenario_1(k, phase2=False):
+def scenario_1(k, phase2=False, mappo=None):
     end = 60.0 * k
     flows = [
         FlowSpec(0, "src0", FlowModel.POISSON, 8.0, VIDEO,   0.0, end),
         FlowSpec(1, "src1", FlowModel.CONTROL, 5.0, CONTROL, 0.0, end),
     ]
     return run_emulation(TOPO, flows, [], end, metric_interval=10.0 * k,
-                         enable_phase2=phase2,
+                         enable_phase2=phase2, mappo_ckpt=mappo,
                          title="Scenario 1 - Single Bottleneck (load=13 > cap=10)")
 
 
-def scenario_2(k, phase2=False):
+def scenario_2(k, phase2=False, mappo=None):
     end = 80.0 * k
     s20, s50 = 20.0 * k, 50.0 * k
     flows = [
@@ -55,11 +63,11 @@ def scenario_2(k, phase2=False):
         FlowSpec(1, "src1", FlowModel.BURSTY,  6.0, VIDEO,   s20, s50),  # surge
     ]
     return run_emulation(TOPO, flows, [], end, metric_interval=10.0 * k,
-                         enable_phase2=phase2,
+                         enable_phase2=phase2, mappo_ckpt=mappo,
                          title="Scenario 2 - Flash Crowd (surge t=20->50)")
 
 
-def scenario_3(k, phase2=False):
+def scenario_3(k, phase2=False, mappo=None):
     end = 80.0 * k
     flows = [
         FlowSpec(0, "src0", FlowModel.POISSON, 7.0, VIDEO,   0.0, end),
@@ -67,11 +75,11 @@ def scenario_3(k, phase2=False):
     ]
     events = [(30.0 * k, "rate", 4.0), (60.0 * k, "rate", 10.0)]
     return run_emulation(TOPO, flows, events, end, metric_interval=10.0 * k,
-                         enable_phase2=phase2,
+                         enable_phase2=phase2, mappo_ckpt=mappo,
                          title="Scenario 3 - Bandwidth Degradation (10->4 a t=30, 10 a t=60)")
 
 
-def scenario_4(k, phase2=False):
+def scenario_4(k, phase2=False, mappo=None):
     end = 90.0 * k
     flows = [
         FlowSpec(0, "src0", FlowModel.POISSON, 6.0, VIDEO,   0.0, end),
@@ -79,11 +87,11 @@ def scenario_4(k, phase2=False):
     ]
     events = [(30.0 * k, "down", None), (55.0 * k, "up", None)]
     return run_emulation(TOPO, flows, events, end, metric_interval=10.0 * k,
-                         enable_phase2=phase2,
+                         enable_phase2=phase2, mappo_ckpt=mappo,
                          title="Scenario 4 - Link Failure & Recovery (giu' t=30, su t=55)")
 
 
-def scenario_5(k, phase2=False):
+def scenario_5(k, phase2=False, mappo=None):
     end = 100.0 * k
     flows = [
         FlowSpec(0, "src0", FlowModel.POISSON, 7.0, VIDEO,     0.0, end),
@@ -91,11 +99,11 @@ def scenario_5(k, phase2=False):
         FlowSpec(2, "src2", FlowModel.CONTROL, 3.0, CONTROL,   0.0, end),
     ]
     return run_emulation(TOPO, flows, [], end, metric_interval=10.0 * k,
-                         enable_phase2=phase2,
+                         enable_phase2=phase2, mappo_ckpt=mappo,
                          title="Scenario 5 - Persistent Overload (load=15 >> cap=10)")
 
 
-def scenario_6(k, phase2=False):
+def scenario_6(k, phase2=False, mappo=None):
     end = 80.0 * k
     flows = [
         FlowSpec(0, "src0", FlowModel.VIDEO,              5.0, VIDEO,     0.0, end),
@@ -104,7 +112,7 @@ def scenario_6(k, phase2=False):
     ]
     # queue_size=30 come nello scenario 6 del simulatore
     return run_emulation(TOPO, flows, [], end, metric_interval=10.0 * k, queue_limit=30,
-                         enable_phase2=phase2,
+                         enable_phase2=phase2, mappo_ckpt=mappo,
                          title="Scenario 6 - Mixed Telemetry & Video (control protetto)")
 
 
@@ -121,13 +129,28 @@ def main():
     which = sys.argv[1]
     scale = 1.0
     phase2 = "--phase2" in sys.argv
+    mappo = None
     if "--scale" in sys.argv:
         try:
             scale = float(sys.argv[sys.argv.index("--scale") + 1])
         except (IndexError, ValueError):
             print("--scale richiede un numero (es. --scale 0.5)")
             sys.exit(1)
-    SCENARIOS[which](scale, phase2=phase2)
+    if "--mappo" in sys.argv:
+        try:
+            mappo = sys.argv[sys.argv.index("--mappo") + 1]
+        except IndexError:
+            print("--mappo richiede il path del checkpoint JSON "
+                  "(es. --mappo checkpoints/mappo_best_stab.json)")
+            sys.exit(1)
+        if not os.path.exists(mappo):
+            print(f"checkpoint non trovato: {mappo}")
+            sys.exit(1)
+        if phase2:
+            print("--mappo e --phase2 sono alternativi: la Fase 3 usa gia' "
+                  "il compressore. Ignoro --phase2.")
+            phase2 = False
+    SCENARIOS[which](scale, phase2=phase2, mappo=mappo)
 
 
 if __name__ == "__main__":

@@ -107,6 +107,73 @@ QUEUE_LIMIT=30 ./deploy.sh single_bottleneck
 
 ---
 
+## Le tre modalità di controllo
+
+Ogni scenario può girare sotto tre controller diversi. La rete, le code e il
+traffico sono identici: cambia solo **chi decide lo stato di compressione**.
+
+| Modalità | Flag | Chi decide le transizioni |
+|---|---|---|
+| **Fase 1** | *(nessuno)* | soglie istantanee sull'occupancy |
+| **Fase 2** | `--phase2` | EWMA + isteresi asimmetrica (eFRAC) |
+| **Fase 3** | `--mappo CKPT` | policy **MAPPO addestrata** nel simulatore |
+
+```bash
+python3 emulator/scenarios.py 1                 # Fase 1
+python3 emulator/scenarios.py 1 --phase2        # Fase 2 (compressore NFQUEUE)
+python3 emulator/scenarios.py 1 \
+    --mappo ../Event-Driven_Simulator/checkpoints/mappo_best_stab.json   # Fase 3
+```
+
+### Deploy della policy appresa (Fase 3)
+
+La Fase 3 chiude l'arco **simulatore → emulatore**: la rete neurale Actor
+addestrata con MAPPO (repo `Event-Driven_Simulator`, branch `phase3-mappo`)
+viene caricata nel control-plane e pilota la macchina di stato sulla rete
+ContainerLab reale, usando lo stesso middlebox di compressione NFQUEUE della
+Fase 2.
+
+- **`agent/eds_actor.py`** carica il checkpoint JSON e ne calcola il forward
+  pass in **Python puro** (nessun numpy/torch): l'Actor gira ovunque, coerente
+  con il documento MAPPO (Tabella 10, "Deploy emulatore"). Il forward pass è
+  verificato per parità numerica (errore ≈ 1e-16) contro l'Actor NumPy del
+  simulatore.
+- A ogni secondo il control-plane costruisce l'osservazione a 7 feature dalle
+  statistiche `tc` reali e dal mix di traffico offerto, interroga l'Actor e
+  applica `ESCALATE / MAINTAIN / DE-ESCALATE`.
+
+**Scarto sim-to-real:** due delle sette feature (frazione di pacchetti ad alta
+e bassa priorità in coda) non sono ispezionabili via `tc` sull'emulatore e
+vengono approssimate con la composizione del traffico *offerto*. È l'unico
+punto in cui l'osservazione di deploy differisce da quella di training.
+
+Per ottenere un checkpoint, nel repo del simulatore:
+
+```bash
+python3 examples/train_mappo.py --episodes 4000 --stability-penalty 0.1
+# → produce checkpoints/mappo_best_stab.json
+```
+
+### Confronto automatico dei tre controller
+
+`emulator/benchmark.py` esegue i tre controller su tutti gli scenari **sullo
+stesso ferro**, rieseguendo `deploy.sh` fra un run e l'altro per partire sempre
+da uno stato `tc` pulito, e stampa la tabella comparativa dei KPI (media su più
+ripetizioni, perché l'emulatore ha rumore reale).
+
+```bash
+python3 emulator/benchmark.py \
+    --mappo-ckpt ../Event-Driven_Simulator/checkpoints/mappo_best_stab.json \
+    --scale 0.5                 # tempi dimezzati per uno sweep più rapido
+
+# solo alcuni scenari, due ripetizioni, con CSV:
+python3 emulator/benchmark.py --scenarios 1,3,5 --repeats 2 \
+    --mappo-ckpt ../Event-Driven_Simulator/checkpoints/mappo_best_stab.json \
+    --out logs/benchmark.csv
+```
+
+---
+
 ## Emulatore Fase 1 (`emulator/`)
 
 `emulator/scenarios.py` orchestra uno scenario completo sulla topologia
