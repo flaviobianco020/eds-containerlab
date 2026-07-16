@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.join(ROOT, "agent"))
 sys.path.insert(0, os.path.join(ROOT, "emulator"))
 
 from eds_actor import Actor, ESCALATE, MAINTAIN  # noqa: E402
-from eds_emulator import mappo_action_mask  # noqa: E402
+from eds_emulator import mappo_action_mask, parse_qdisc_stats  # noqa: E402
 
 
 def _actor_with_fixed_logits():
@@ -41,6 +41,20 @@ class TestRobustMappoDeploy(unittest.TestCase):
     def test_old_checkpoint_semantics_have_no_dwell(self):
         self.assertEqual(mappo_action_mask(0.1, 0.0, 0.0, 0.20),
                          [True, True, True])
+
+    def test_qdisc_parent_child_drop_is_not_double_counted(self):
+        output = """qdisc tbf 1: root refcnt 2 rate 10Mbit
+ Sent 100000 bytes 1000 pkt (dropped 200, overlimits 0 requeues 0)
+ backlog 1000b 10p requeues 0
+qdisc netem 10: parent 1:1 limit 40 delay 5ms
+ Sent 100000 bytes 1000 pkt (dropped 200, overlimits 0 requeues 0)
+ backlog 1000b 10p requeues 0
+"""
+        stats = parse_qdisc_stats(output, queue_limit=40)
+        self.assertEqual(stats["dropped"], 200)
+        self.assertEqual(stats["sent_pkts"], 1000)
+        self.assertEqual(stats["backlog_pkts"], 10)
+        self.assertEqual(stats["occupancy"], 0.25)
 
 
 if __name__ == "__main__":

@@ -58,6 +58,42 @@ MAPPO_TRACE_FEATURES = (
     "low_priority_ratio", "drop_rate", "link_utilisation", "time_in_state",
 )
 
+_QDISC_SENT_RE = re.compile(r"Sent (\d+) bytes (\d+) pkt")
+_QDISC_DROP_RE = re.compile(r"dropped (\d+)")
+_QDISC_BACKLOG_RE = re.compile(r"backlog \S+ (\d+)p")
+
+
+def parse_qdisc_stats(output: str, queue_limit: int,
+                      queue_handle: str = "10:") -> dict:
+    """Estrae contatori senza sommare qdisc padre e figlia.
+
+    Il TBF root e la netem figlia espongono spesso lo stesso drop. Il traffico
+    trasmesso viene letto dalla root, mentre drop e backlog provengono dalla
+    netem che implementa la coda finita.
+    """
+    blocks = [b for b in re.split(r"(?=^qdisc )", output, flags=re.MULTILINE)
+              if b.startswith("qdisc ")]
+    root = next((b for b in blocks if " root " in b.splitlines()[0]), "")
+    queue = next((b for b in blocks
+                  if b.splitlines()[0].split()[2] == queue_handle), "")
+    if not queue:
+        queue = root
+    sent_match = _QDISC_SENT_RE.search(root or queue)
+    drop_match = _QDISC_DROP_RE.search(queue)
+    backlog_match = _QDISC_BACKLOG_RE.search(queue)
+    sent_bytes = int(sent_match.group(1)) if sent_match else 0
+    sent_pkts = int(sent_match.group(2)) if sent_match else 0
+    dropped = int(drop_match.group(1)) if drop_match else 0
+    backlog_pkts = int(backlog_match.group(1)) if backlog_match else 0
+    occupancy = backlog_pkts / queue_limit if queue_limit else 0.0
+    return {
+        "sent_bytes": sent_bytes,
+        "sent_pkts": sent_pkts,
+        "dropped": dropped,
+        "backlog_pkts": backlog_pkts,
+        "occupancy": min(max(occupancy, 0.0), 1.0),
+    }
+
 
 def mappo_action_mask(now: float, last_transition: float,
                       min_state_dwell: float, occupancy: float) -> list[bool]:
@@ -280,25 +316,11 @@ class Net:
                 ".clab.yml (../agent:/opt/eds:ro) e ridai il deploy.")
 
     # --- lettura coda (Queue Manager) ---------------------------------------
-    _re_sent = re.compile(r"Sent (\d+) bytes (\d+) pkt")
-    _re_drop = re.compile(r"dropped (\d+)")
-    _re_backlog = re.compile(r"backlog \S+ (\d+)p")
-
     def qdisc_stats(self) -> dict:
         """Legge tc -s qdisc sull'interfaccia del collo di bottiglia."""
         r = self.sh(self.topo.bottleneck_node,
                     f"tc -s qdisc show dev {self.topo.bottleneck_if}")
-        out = r.stdout or ""
-        m = self._re_sent.search(out)
-        sent_bytes = int(m.group(1)) if m else 0
-        sent_pkts = int(m.group(2)) if m else 0
-        dropped = sum(int(x) for x in self._re_drop.findall(out))
-        backlogs = [int(x) for x in self._re_backlog.findall(out)]
-        backlog_pkts = max(backlogs) if backlogs else 0
-        occ = backlog_pkts / self.topo.queue_limit if self.topo.queue_limit else 0.0
-        return {"sent_bytes": sent_bytes, "sent_pkts": sent_pkts,
-                "dropped": dropped, "backlog_pkts": backlog_pkts,
-                "occupancy": min(occ, 1.0)}
+        return parse_qdisc_stats(r.stdout or "", self.topo.queue_limit)
 
     # --- azioni dello scheduler / state machine -----------------------------
     def set_bottleneck_rate(self, rate_mbit: float):
@@ -886,6 +908,7 @@ def _summarize(topo, flows, results, metrics, stats0, stats1, end_time) -> dict:
     thr_mbps = (bytes_total * 8.0 / end_time / 1e6) if end_time else 0.0
     latency_ms = (lat_sum / lat_n * 1000.0) if lat_n else 0.0
     drops = stats1["dropped"] - stats0["dropped"]
+    endpoint_loss = max(sent_total - recv_total, 0)
     occ_avg = (sum(s[1] for s in metrics.samples) / len(metrics.samples)
                if metrics.samples else 0.0)
 
@@ -905,6 +928,27 @@ def _summarize(topo, flows, results, metrics, stats0, stats1, end_time) -> dict:
         per_flow_thr[str(fid_str)] = f.get("recv", 0)
     fairness = metrics.jain(list(per_flow_thr.values()))
 
+    # KPI per classe, ricavati dagli identificativi di flusso presenti sia nel
+    # report sender sia nel report receiver. Non dipendono dai contatori tc.
+    class_names = {0: "CONTROL", 1: "TELEMETRY", 2: "VIDEO"}
+    flow_priority = {str(f.fid): f.tclass[2] for f in flows}
+    class_metrics = {
+        name: {"generated": 0, "delivered": 0, "pdr": 0.0}
+        for name in class_names.values()
+    }
+    for sender in results["send"]:
+        fid = str(sender.get("flow_id"))
+        pri = flow_priority.get(fid)
+        if pri in class_names:
+            class_metrics[class_names[pri]]["generated"] += sender.get("sent", 0)
+    for fid, received in recv_flows.items():
+        pri = flow_priority.get(str(fid))
+        if pri in class_names:
+            class_metrics[class_names[pri]]["delivered"] += received.get("recv", 0)
+    for values in class_metrics.values():
+        if values["generated"]:
+            values["pdr"] = round(values["delivered"] / values["generated"], 4)
+
     summary = {
         "generated": sent_total,
         "delivered": recv_total,
@@ -914,10 +958,12 @@ def _summarize(topo, flows, results, metrics, stats0, stats1, end_time) -> dict:
         "end_to_end_latency_ms": round(latency_ms, 3),
         "avg_queue_occupancy": round(occ_avg, 4),
         "drop_count": drops,
+        "endpoint_loss_count": endpoint_loss,
         "congestion_state_transitions": metrics.transitions,
         "fairness_jain": round(fairness, 4),
         "compression_ratio": round(real_compression_ratio, 3),
         "state_time_s": {k: round(v, 2) for k, v in metrics._state_time.items()},
+        "class_metrics": class_metrics,
     }
 
     print("-" * 70)
@@ -930,12 +976,18 @@ def _summarize(topo, flows, results, metrics, stats0, stats1, end_time) -> dict:
           f"({summary['throughput_mbps']:.3f} Mbit/s)")
     print(f"  Latenza end-to-end .............. {summary['end_to_end_latency_ms']:.2f} ms")
     print(f"  Occupancy media coda ............ {summary['avg_queue_occupancy']*100:.1f}%")
-    print(f"  Drop totali (coda) .............. {summary['drop_count']}")
+    print(f"  Drop coda netem (non duplicati) . {summary['drop_count']}")
+    print(f"  Perdite end-to-end .............. {summary['endpoint_loss_count']}")
     print(f"  Transizioni stato congestione ... {summary['congestion_state_transitions']}")
     print(f"  Fairness (Jain) ................. {summary['fairness_jain']:.3f}")
     print(f"  Compression ratio (reale, byte) . {summary['compression_ratio']:.3f}x")
     st_line = "  ".join(f"{k[:4]}={v:.1f}s" for k, v in summary["state_time_s"].items() if v > 0)
     if st_line:
         print(f"  Tempo per stato ................. {st_line}")
+    print("  PDR per classe:")
+    for name, values in summary["class_metrics"].items():
+        if values["generated"]:
+            print(f"    {name:<10} {values['pdr']*100:6.2f}%  "
+                  f"({values['delivered']}/{values['generated']})")
     print("-" * 70)
     return summary
