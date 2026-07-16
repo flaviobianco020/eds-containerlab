@@ -1,0 +1,2268 @@
+{
+  "schema": "eds-mappo-observation-trace-v1",
+  "source": "simulator",
+  "scenario": 3,
+  "features": [
+    "ewma_occupancy",
+    "congestion_state",
+    "high_priority_ratio",
+    "low_priority_ratio",
+    "drop_rate",
+    "link_utilisation",
+    "time_in_state"
+  ],
+  "checkpoint": "/home/user/Event-Driven_Simulator/checkpoints/mappo_delta05.json",
+  "min_state_dwell": 0.0,
+  "rows": [
+    {
+      "t": 0.0,
+      "observation": {
+        "ewma_occupancy": 0.0,
+        "congestion_state": 0.0,
+        "high_priority_ratio": 0.0,
+        "low_priority_ratio": 0.0,
+        "drop_rate": 0.0,
+        "link_utilisation": 0.0,
+        "time_in_state": 0.0
+      },
+      "action": "DEESCALATE",
+      "action_id": 2,
+      "action_probabilities": [
+        0.17374971927340813,
+        0.37199059443731164,
+        0.4542596862892804
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 0
+    },
+    {
+      "t": 1.0,
+      "observation": {
+        "ewma_occupancy": 0.10536699034273625,
+        "congestion_state": 0.0,
+        "high_priority_ratio": 0.4,
+        "low_priority_ratio": 0.6,
+        "drop_rate": 0.0,
+        "link_utilisation": 0.9,
+        "time_in_state": 0.03333333333333333
+      },
+      "action": "DEESCALATE",
+      "action_id": 2,
+      "action_probabilities": [
+        0.03782567485931578,
+        0.21816618649149394,
+        0.7440081386491902
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 0
+    },
+    {
+      "t": 2.0,
+      "observation": {
+        "ewma_occupancy": 0.33858298862673814,
+        "congestion_state": 0.0,
+        "high_priority_ratio": 0.3,
+        "low_priority_ratio": 0.7,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.06666666666666667
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.3242405697209161,
+        0.5980984674921537,
+        0.07766096278693024
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 0
+    },
+    {
+      "t": 3.0,
+      "observation": {
+        "ewma_occupancy": 0.6364387932415138,
+        "congestion_state": 0.0,
+        "high_priority_ratio": 0.29411764705882354,
+        "low_priority_ratio": 0.7058823529411765,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.1
+      },
+      "action": "ESCALATE",
+      "action_id": 0,
+      "action_probabilities": [
+        0.7635530979713679,
+        0.2324043508273617,
+        0.0040425512012702836
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 1
+    },
+    {
+      "t": 4.0,
+      "observation": {
+        "ewma_occupancy": 0.8563446064890886,
+        "congestion_state": 0.25,
+        "high_priority_ratio": 0.3,
+        "low_priority_ratio": 0.7,
+        "drop_rate": 0.07142857142857142,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.03333333333333333
+      },
+      "action": "ESCALATE",
+      "action_id": 0,
+      "action_probabilities": [
+        0.5311671315381671,
+        0.46536794329517317,
+        0.003464925166659764
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 2
+    },
+    {
+      "t": 5.0,
+      "observation": {
+        "ewma_occupancy": 0.8488201392098197,
+        "congestion_state": 0.5,
+        "high_priority_ratio": 0.4,
+        "low_priority_ratio": 0.6,
+        "drop_rate": 0.25,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.03333333333333333
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.09442582344508861,
+        0.9019039641554812,
+        0.003670212399430169
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 2
+    },
+    {
+      "t": 6.0,
+      "observation": {
+        "ewma_occupancy": 0.7471612035943824,
+        "congestion_state": 0.5,
+        "high_priority_ratio": 0.5714285714285714,
+        "low_priority_ratio": 0.42857142857142855,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.06666666666666667
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.0866470097951503,
+        0.9069547178423495,
+        0.006398272362500327
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 2
+    },
+    {
+      "t": 7.0,
+      "observation": {
+        "ewma_occupancy": 0.5774490772499353,
+        "congestion_state": 0.5,
+        "high_priority_ratio": 0.4,
+        "low_priority_ratio": 0.6,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.1
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.06102415512749126,
+        0.9175031234294815,
+        0.021472721443027483
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 2
+    },
+    {
+      "t": 8.0,
+      "observation": {
+        "ewma_occupancy": 0.27824468203311375,
+        "congestion_state": 0.5,
+        "high_priority_ratio": 0.25,
+        "low_priority_ratio": 0.75,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.13333333333333333
+      },
+      "action": "DEESCALATE",
+      "action_id": 2,
+      "action_probabilities": [
+        0.00804772252244764,
+        0.2002479995172706,
+        0.7917042779602818
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 1
+    },
+    {
+      "t": 9.0,
+      "observation": {
+        "ewma_occupancy": 0.26599698270396405,
+        "congestion_state": 0.25,
+        "high_priority_ratio": 0.6,
+        "low_priority_ratio": 0.4,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.03333333333333333
+      },
+      "action": "DEESCALATE",
+      "action_id": 2,
+      "action_probabilities": [
+        0.02616446672678164,
+        0.3255485243468667,
+        0.6482870089263516
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 0
+    },
+    {
+      "t": 10.0,
+      "observation": {
+        "ewma_occupancy": 0.35368636992997576,
+        "congestion_state": 0.0,
+        "high_priority_ratio": 0.5,
+        "low_priority_ratio": 0.5,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.03333333333333333
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.30209955804516975,
+        0.5981671817131113,
+        0.09973326024171872
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 0
+    },
+    {
+      "t": 11.0,
+      "observation": {
+        "ewma_occupancy": 0.3992301220669188,
+        "congestion_state": 0.0,
+        "high_priority_ratio": 0.5,
+        "low_priority_ratio": 0.5,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.06666666666666667
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.4140091398580208,
+        0.5314233733071928,
+        0.05456748683478652
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 0
+    },
+    {
+      "t": 12.0,
+      "observation": {
+        "ewma_occupancy": 0.5623245967451048,
+        "congestion_state": 0.0,
+        "high_priority_ratio": 0.2857142857142857,
+        "low_priority_ratio": 0.7142857142857143,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.1
+      },
+      "action": "ESCALATE",
+      "action_id": 0,
+      "action_probabilities": [
+        0.6852424860199474,
+        0.30829889696228774,
+        0.006458617017764714
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 1
+    },
+    {
+      "t": 13.0,
+      "observation": {
+        "ewma_occupancy": 0.6716060581006091,
+        "congestion_state": 0.25,
+        "high_priority_ratio": 0.4666666666666667,
+        "low_priority_ratio": 0.5333333333333333,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.03333333333333333
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.2917611701045402,
+        0.7017543299410178,
+        0.006484499954441997
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 1
+    },
+    {
+      "t": 14.0,
+      "observation": {
+        "ewma_occupancy": 0.7148854669620346,
+        "congestion_state": 0.25,
+        "high_priority_ratio": 0.42857142857142855,
+        "low_priority_ratio": 0.5714285714285714,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.06666666666666667
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.4005988979938479,
+        0.5940924366595101,
+        0.005308665346641981
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 1
+    },
+    {
+      "t": 15.0,
+      "observation": {
+        "ewma_occupancy": 0.6291941767914772,
+        "congestion_state": 0.25,
+        "high_priority_ratio": 0.5454545454545454,
+        "low_priority_ratio": 0.45454545454545453,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.1
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.3276702530174492,
+        0.6622778852912741,
+        0.010051861691276686
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 1
+    },
+    {
+      "t": 16.0,
+      "observation": {
+        "ewma_occupancy": 0.6019300670416502,
+        "congestion_state": 0.25,
+        "high_priority_ratio": 0.4,
+        "low_priority_ratio": 0.6,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.13333333333333333
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.3725824074282292,
+        0.6176725014818498,
+        0.009745091089920986
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 1
+    },
+    {
+      "t": 17.0,
+      "observation": {
+        "ewma_occupancy": 0.6003303290667521,
+        "congestion_state": 0.25,
+        "high_priority_ratio": 0.3333333333333333,
+        "low_priority_ratio": 0.6666666666666666,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.16666666666666666
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.4239442293974643,
+        0.5665480534778754,
+        0.009507717124660423
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 1
+    },
+    {
+      "t": 18.0,
+      "observation": {
+        "ewma_occupancy": 0.6312689726354648,
+        "congestion_state": 0.25,
+        "high_priority_ratio": 0.38461538461538464,
+        "low_priority_ratio": 0.6153846153846154,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.2
+      },
+      "action": "ESCALATE",
+      "action_id": 0,
+      "action_probabilities": [
+        0.5246378567639615,
+        0.4674525499880732,
+        0.007909593247965327
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 2
+    },
+    {
+      "t": 19.0,
+      "observation": {
+        "ewma_occupancy": 0.7611558688651119,
+        "congestion_state": 0.5,
+        "high_priority_ratio": 0.3,
+        "low_priority_ratio": 0.7,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.03333333333333333
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.09147522059118786,
+        0.90378404594074,
+        0.0047407334680722455
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 2
+    },
+    {
+      "t": 20.0,
+      "observation": {
+        "ewma_occupancy": 0.8225010889571586,
+        "congestion_state": 0.5,
+        "high_priority_ratio": 0.3125,
+        "low_priority_ratio": 0.6875,
+        "drop_rate": 0.15384615384615385,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.06666666666666667
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.11611396365810686,
+        0.8798485730034806,
+        0.004037463338412485
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 2
+    },
+    {
+      "t": 21.0,
+      "observation": {
+        "ewma_occupancy": 0.5944828885791497,
+        "congestion_state": 0.5,
+        "high_priority_ratio": 0.5555555555555556,
+        "low_priority_ratio": 0.4444444444444444,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.1
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.06157146822389408,
+        0.9141211695401155,
+        0.02430736223599033
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 2
+    },
+    {
+      "t": 22.0,
+      "observation": {
+        "ewma_occupancy": 0.24788787763788891,
+        "congestion_state": 0.5,
+        "high_priority_ratio": 0.3333333333333333,
+        "low_priority_ratio": 0.6666666666666666,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.13333333333333333
+      },
+      "action": "DEESCALATE",
+      "action_id": 2,
+      "action_probabilities": [
+        0.004491898675985517,
+        0.1262320460110273,
+        0.8692760553129871
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 1
+    },
+    {
+      "t": 23.0,
+      "observation": {
+        "ewma_occupancy": 0.18493335405775527,
+        "congestion_state": 0.25,
+        "high_priority_ratio": 0.2,
+        "low_priority_ratio": 0.8,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.03333333333333333
+      },
+      "action": "DEESCALATE",
+      "action_id": 2,
+      "action_probabilities": [
+        0.02197356473461716,
+        0.2621396196508039,
+        0.7158868156145788
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 0
+    },
+    {
+      "t": 24.0,
+      "observation": {
+        "ewma_occupancy": 0.22880402597214056,
+        "congestion_state": 0.0,
+        "high_priority_ratio": 0.4,
+        "low_priority_ratio": 0.6,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.03333333333333333
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.13011750073243866,
+        0.46837111727503444,
+        0.4015113819925268
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 0
+    },
+    {
+      "t": 25.0,
+      "observation": {
+        "ewma_occupancy": 0.38411924867768105,
+        "congestion_state": 0.0,
+        "high_priority_ratio": 0.21428571428571427,
+        "low_priority_ratio": 0.7857142857142857,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.06666666666666667
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.3874692421996143,
+        0.5768704578566336,
+        0.03566029994375205
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 0
+    },
+    {
+      "t": 26.0,
+      "observation": {
+        "ewma_occupancy": 0.684850879494027,
+        "congestion_state": 0.0,
+        "high_priority_ratio": 0.375,
+        "low_priority_ratio": 0.625,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.1
+      },
+      "action": "ESCALATE",
+      "action_id": 0,
+      "action_probabilities": [
+        0.8163351797549365,
+        0.18053868420490446,
+        0.0031261360401590946
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 1
+    },
+    {
+      "t": 27.0,
+      "observation": {
+        "ewma_occupancy": 0.7214417434418056,
+        "congestion_state": 0.25,
+        "high_priority_ratio": 0.4375,
+        "low_priority_ratio": 0.5625,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.03333333333333333
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.35142154676829185,
+        0.6433856008743317,
+        0.005192852357376455
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 1
+    },
+    {
+      "t": 28.0,
+      "observation": {
+        "ewma_occupancy": 0.8708521227380293,
+        "congestion_state": 0.25,
+        "high_priority_ratio": 0.3157894736842105,
+        "low_priority_ratio": 0.6842105263157895,
+        "drop_rate": 0.17647058823529413,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.06666666666666667
+      },
+      "action": "ESCALATE",
+      "action_id": 0,
+      "action_probabilities": [
+        0.6182102029124327,
+        0.3786277254223111,
+        0.0031620716652561733
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 2
+    },
+    {
+      "t": 29.0,
+      "observation": {
+        "ewma_occupancy": 0.9190498443830555,
+        "congestion_state": 0.5,
+        "high_priority_ratio": 0.3888888888888889,
+        "low_priority_ratio": 0.6111111111111112,
+        "drop_rate": 0.3333333333333333,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.03333333333333333
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.12986135963823944,
+        0.8667352505562441,
+        0.0034033898055163578
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 2
+    },
+    {
+      "t": 30.0,
+      "observation": {
+        "ewma_occupancy": 0.8931332654579485,
+        "congestion_state": 0.5,
+        "high_priority_ratio": 0.5,
+        "low_priority_ratio": 0.5,
+        "drop_rate": 0.08333333333333333,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.06666666666666667
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.1376952085870696,
+        0.8585706952298113,
+        0.0037340961831190413
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 2
+    },
+    {
+      "t": 31.0,
+      "observation": {
+        "ewma_occupancy": 0.7253912159683743,
+        "congestion_state": 0.5,
+        "high_priority_ratio": 0.4166666666666667,
+        "low_priority_ratio": 0.5833333333333334,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.1
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.09421903947600917,
+        0.8998522514514044,
+        0.005928709072586489
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 2
+    },
+    {
+      "t": 32.0,
+      "observation": {
+        "ewma_occupancy": 0.7660755202005893,
+        "congestion_state": 0.5,
+        "high_priority_ratio": 0.42105263157894735,
+        "low_priority_ratio": 0.5789473684210527,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.13333333333333333
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.12702561616608007,
+        0.867727784110138,
+        0.005246599723781984
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 2
+    },
+    {
+      "t": 33.0,
+      "observation": {
+        "ewma_occupancy": 0.877773610178258,
+        "congestion_state": 0.5,
+        "high_priority_ratio": 0.42105263157894735,
+        "low_priority_ratio": 0.5789473684210527,
+        "drop_rate": 0.3,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.16666666666666666
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.22334365086452956,
+        0.7725991323353376,
+        0.004057216800132758
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 2
+    },
+    {
+      "t": 34.0,
+      "observation": {
+        "ewma_occupancy": 0.9175851343683696,
+        "congestion_state": 0.5,
+        "high_priority_ratio": 0.5263157894736842,
+        "low_priority_ratio": 0.47368421052631576,
+        "drop_rate": 0.3333333333333333,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.2
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.32774062670556964,
+        0.6679225310992131,
+        0.004336842195217362
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 2
+    },
+    {
+      "t": 35.0,
+      "observation": {
+        "ewma_occupancy": 0.937270815044942,
+        "congestion_state": 0.5,
+        "high_priority_ratio": 0.631578947368421,
+        "low_priority_ratio": 0.3684210526315789,
+        "drop_rate": 0.2222222222222222,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.23333333333333334
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.41526236411739675,
+        0.5797481883919278,
+        0.00498944749067543
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 2
+    },
+    {
+      "t": 36.0,
+      "observation": {
+        "ewma_occupancy": 0.9442872013825319,
+        "congestion_state": 0.5,
+        "high_priority_ratio": 0.65,
+        "low_priority_ratio": 0.35,
+        "drop_rate": 0.36363636363636365,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.26666666666666666
+      },
+      "action": "ESCALATE",
+      "action_id": 0,
+      "action_probabilities": [
+        0.52206533099926,
+        0.4727712917543958,
+        0.005163377246344211
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 3
+    },
+    {
+      "t": 37.0,
+      "observation": {
+        "ewma_occupancy": 0.9360378573838114,
+        "congestion_state": 0.75,
+        "high_priority_ratio": 0.6111111111111112,
+        "low_priority_ratio": 0.3888888888888889,
+        "drop_rate": 0.5454545454545454,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.03333333333333333
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.03693070956643312,
+        0.954943081772972,
+        0.008126208660594785
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 3
+    },
+    {
+      "t": 38.0,
+      "observation": {
+        "ewma_occupancy": 0.9290763498227294,
+        "congestion_state": 0.75,
+        "high_priority_ratio": 0.55,
+        "low_priority_ratio": 0.45,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.06666666666666667
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.046223934462753635,
+        0.9493784052562187,
+        0.004397660281027732
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 3
+    },
+    {
+      "t": 39.0,
+      "observation": {
+        "ewma_occupancy": 0.9406095637523434,
+        "congestion_state": 0.75,
+        "high_priority_ratio": 0.5789473684210527,
+        "low_priority_ratio": 0.42105263157894735,
+        "drop_rate": 0.5555555555555556,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.1
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.040487194768488506,
+        0.9524185291407674,
+        0.007094276090744191
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 3
+    },
+    {
+      "t": 40.0,
+      "observation": {
+        "ewma_occupancy": 0.9425863506632491,
+        "congestion_state": 0.75,
+        "high_priority_ratio": 0.5263157894736842,
+        "low_priority_ratio": 0.47368421052631576,
+        "drop_rate": 0.2,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.13333333333333333
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.046653890137095255,
+        0.9491935900418187,
+        0.00415251982108593
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 3
+    },
+    {
+      "t": 41.0,
+      "observation": {
+        "ewma_occupancy": 0.9408386902734109,
+        "congestion_state": 0.75,
+        "high_priority_ratio": 0.5555555555555556,
+        "low_priority_ratio": 0.4444444444444444,
+        "drop_rate": 0.3333333333333333,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.16666666666666666
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.04900440867343621,
+        0.9461678854963613,
+        0.004827705830202494
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 3
+    },
+    {
+      "t": 42.0,
+      "observation": {
+        "ewma_occupancy": 0.9359653794783763,
+        "congestion_state": 0.75,
+        "high_priority_ratio": 0.42105263157894735,
+        "low_priority_ratio": 0.5789473684210527,
+        "drop_rate": 0.3333333333333333,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.2
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.04705999072866271,
+        0.9490792177659396,
+        0.003860791505397653
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 3
+    },
+    {
+      "t": 43.0,
+      "observation": {
+        "ewma_occupancy": 0.9437013280115185,
+        "congestion_state": 0.75,
+        "high_priority_ratio": 0.35,
+        "low_priority_ratio": 0.65,
+        "drop_rate": 0.46153846153846156,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.23333333333333334
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.055189262169062246,
+        0.9406960657440968,
+        0.004114672086841099
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 3
+    },
+    {
+      "t": 44.0,
+      "observation": {
+        "ewma_occupancy": 0.9427413810608817,
+        "congestion_state": 0.75,
+        "high_priority_ratio": 0.3,
+        "low_priority_ratio": 0.7,
+        "drop_rate": 0.46153846153846156,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.26666666666666666
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.0701830715503513,
+        0.9253989723965705,
+        0.004417956053078127
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 3
+    },
+    {
+      "t": 45.0,
+      "observation": {
+        "ewma_occupancy": 0.9408995700755224,
+        "congestion_state": 0.75,
+        "high_priority_ratio": 0.3888888888888889,
+        "low_priority_ratio": 0.6111111111111112,
+        "drop_rate": 0.5714285714285714,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.3
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.07100218629287883,
+        0.923823191277715,
+        0.005174622429406181
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 3
+    },
+    {
+      "t": 46.0,
+      "observation": {
+        "ewma_occupancy": 0.9459157696526153,
+        "congestion_state": 0.75,
+        "high_priority_ratio": 0.5,
+        "low_priority_ratio": 0.5,
+        "drop_rate": 0.3,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.3333333333333333
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.09678058111596333,
+        0.8982398840197533,
+        0.004979534864283224
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 3
+    },
+    {
+      "t": 47.0,
+      "observation": {
+        "ewma_occupancy": 0.948396139472496,
+        "congestion_state": 0.75,
+        "high_priority_ratio": 0.4,
+        "low_priority_ratio": 0.6,
+        "drop_rate": 0.5625,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.36666666666666664
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.1147189841799674,
+        0.8797179903174568,
+        0.0055630255025756895
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 3
+    },
+    {
+      "t": 48.0,
+      "observation": {
+        "ewma_occupancy": 0.9367343673179617,
+        "congestion_state": 0.75,
+        "high_priority_ratio": 0.3,
+        "low_priority_ratio": 0.7,
+        "drop_rate": 0.3,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.4
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.16772181236679748,
+        0.8269891562705184,
+        0.005289031362684004
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 3
+    },
+    {
+      "t": 49.0,
+      "observation": {
+        "ewma_occupancy": 0.9321548371620829,
+        "congestion_state": 0.75,
+        "high_priority_ratio": 0.3157894736842105,
+        "low_priority_ratio": 0.6842105263157895,
+        "drop_rate": 0.25,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.43333333333333335
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.2059796689718452,
+        0.7882820508344451,
+        0.005738280193709526
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 3
+    },
+    {
+      "t": 50.0,
+      "observation": {
+        "ewma_occupancy": 0.9317372682086256,
+        "congestion_state": 0.75,
+        "high_priority_ratio": 0.4,
+        "low_priority_ratio": 0.6,
+        "drop_rate": 0.4166666666666667,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.4666666666666667
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.2300629522365483,
+        0.763495114624896,
+        0.0064419331385556075
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 3
+    },
+    {
+      "t": 51.0,
+      "observation": {
+        "ewma_occupancy": 0.9376167597483697,
+        "congestion_state": 0.75,
+        "high_priority_ratio": 0.42105263157894735,
+        "low_priority_ratio": 0.5789473684210527,
+        "drop_rate": 0.5,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.5
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.3178556916073072,
+        0.674792118063909,
+        0.007352190328783756
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 3
+    },
+    {
+      "t": 52.0,
+      "observation": {
+        "ewma_occupancy": 0.9451371522776851,
+        "congestion_state": 0.75,
+        "high_priority_ratio": 0.5,
+        "low_priority_ratio": 0.5,
+        "drop_rate": 0.42857142857142855,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.5333333333333333
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.4289084088121247,
+        0.5629385200337875,
+        0.008153071154087756
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 3
+    },
+    {
+      "t": 53.0,
+      "observation": {
+        "ewma_occupancy": 0.9480903796187505,
+        "congestion_state": 0.75,
+        "high_priority_ratio": 0.5,
+        "low_priority_ratio": 0.5,
+        "drop_rate": 0.4166666666666667,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.5666666666666667
+      },
+      "action": "ESCALATE",
+      "action_id": 0,
+      "action_probabilities": [
+        0.536923626377795,
+        0.4550532399637725,
+        0.008023133658432387
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 4
+    },
+    {
+      "t": 54.0,
+      "observation": {
+        "ewma_occupancy": 0.9154398658286882,
+        "congestion_state": 1.0,
+        "high_priority_ratio": 0.6470588235294118,
+        "low_priority_ratio": 0.35294117647058826,
+        "drop_rate": 0.6666666666666666,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.03333333333333333
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.01982579219584065,
+        0.9174427424530162,
+        0.06273146535114318
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 4
+    },
+    {
+      "t": 55.0,
+      "observation": {
+        "ewma_occupancy": 0.8450934140320564,
+        "congestion_state": 1.0,
+        "high_priority_ratio": 0.8,
+        "low_priority_ratio": 0.2,
+        "drop_rate": 0.375,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.06666666666666667
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.028296525096780642,
+        0.8611202150024196,
+        0.11058325990079973
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 4
+    },
+    {
+      "t": 56.0,
+      "observation": {
+        "ewma_occupancy": 0.7567382409440051,
+        "congestion_state": 1.0,
+        "high_priority_ratio": 1.0,
+        "low_priority_ratio": 0.0,
+        "drop_rate": 0.5454545454545454,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.1
+      },
+      "action": "DEESCALATE",
+      "action_id": 2,
+      "action_probabilities": [
+        0.019535834070423516,
+        0.4084764232193335,
+        0.571987742710243
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 3
+    },
+    {
+      "t": 57.0,
+      "observation": {
+        "ewma_occupancy": 0.7346868704636242,
+        "congestion_state": 0.75,
+        "high_priority_ratio": 0.6666666666666666,
+        "low_priority_ratio": 0.3333333333333333,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.03333333333333333
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.03499856022206632,
+        0.9437744317061513,
+        0.02122700807178251
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 3
+    },
+    {
+      "t": 58.0,
+      "observation": {
+        "ewma_occupancy": 0.814132990532982,
+        "congestion_state": 0.75,
+        "high_priority_ratio": 0.45,
+        "low_priority_ratio": 0.55,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.06666666666666667
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.03223267926748967,
+        0.961539706797566,
+        0.006227613934944289
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 3
+    },
+    {
+      "t": 59.0,
+      "observation": {
+        "ewma_occupancy": 0.896645581923725,
+        "congestion_state": 0.75,
+        "high_priority_ratio": 0.45,
+        "low_priority_ratio": 0.55,
+        "drop_rate": 0.5882352941176471,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.1
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.02840731343254216,
+        0.964295810224514,
+        0.007296876342943594
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 3
+    },
+    {
+      "t": 60.0,
+      "observation": {
+        "ewma_occupancy": 0.923579188572984,
+        "congestion_state": 0.75,
+        "high_priority_ratio": 0.47368421052631576,
+        "low_priority_ratio": 0.5263157894736842,
+        "drop_rate": 0.4,
+        "link_utilisation": 0.7,
+        "time_in_state": 0.13333333333333333
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.03704805815107197,
+        0.9602740229548897,
+        0.002677918894038417
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 3
+    },
+    {
+      "t": 61.0,
+      "observation": {
+        "ewma_occupancy": 0.938142463517849,
+        "congestion_state": 0.75,
+        "high_priority_ratio": 0.5789473684210527,
+        "low_priority_ratio": 0.42105263157894735,
+        "drop_rate": 0.5,
+        "link_utilisation": 0.6,
+        "time_in_state": 0.16666666666666666
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.061568050289445723,
+        0.9349414229837961,
+        0.003490526726758207
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 3
+    },
+    {
+      "t": 62.0,
+      "observation": {
+        "ewma_occupancy": 0.9405584377445603,
+        "congestion_state": 0.75,
+        "high_priority_ratio": 0.5789473684210527,
+        "low_priority_ratio": 0.42105263157894735,
+        "drop_rate": 0.46153846153846156,
+        "link_utilisation": 0.7,
+        "time_in_state": 0.2
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.0611953063782213,
+        0.9352598203180504,
+        0.0035448733037281304
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 3
+    },
+    {
+      "t": 63.0,
+      "observation": {
+        "ewma_occupancy": 0.8978001597811893,
+        "congestion_state": 0.75,
+        "high_priority_ratio": 0.625,
+        "low_priority_ratio": 0.375,
+        "drop_rate": 0.36363636363636365,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.23333333333333334
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.059867044625898126,
+        0.931427130279225,
+        0.008705825094876761
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 3
+    },
+    {
+      "t": 64.0,
+      "observation": {
+        "ewma_occupancy": 0.5909209229905386,
+        "congestion_state": 0.75,
+        "high_priority_ratio": 0.25,
+        "low_priority_ratio": 0.75,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.26666666666666666
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.03304704747321278,
+        0.8699131320920606,
+        0.09703982043472657
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 3
+    },
+    {
+      "t": 65.0,
+      "observation": {
+        "ewma_occupancy": 0.43532871512132587,
+        "congestion_state": 0.75,
+        "high_priority_ratio": 0.2857142857142857,
+        "low_priority_ratio": 0.7142857142857143,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.3
+      },
+      "action": "DEESCALATE",
+      "action_id": 2,
+      "action_probabilities": [
+        0.00782203352697263,
+        0.29085181561588336,
+        0.701326150857144
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 2
+    },
+    {
+      "t": 66.0,
+      "observation": {
+        "ewma_occupancy": 0.31645401570147214,
+        "congestion_state": 0.5,
+        "high_priority_ratio": 0.5,
+        "low_priority_ratio": 0.5,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.03333333333333333
+      },
+      "action": "DEESCALATE",
+      "action_id": 2,
+      "action_probabilities": [
+        0.008413596564183947,
+        0.28645119127125235,
+        0.7051352121645638
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 1
+    },
+    {
+      "t": 67.0,
+      "observation": {
+        "ewma_occupancy": 0.2100836001305119,
+        "congestion_state": 0.25,
+        "high_priority_ratio": 0.25,
+        "low_priority_ratio": 0.75,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.03333333333333333
+      },
+      "action": "DEESCALATE",
+      "action_id": 2,
+      "action_probabilities": [
+        0.025519042165991292,
+        0.29724995986990954,
+        0.6772309979640992
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 0
+    },
+    {
+      "t": 68.0,
+      "observation": {
+        "ewma_occupancy": 0.19132359536148863,
+        "congestion_state": 0.0,
+        "high_priority_ratio": 0.5,
+        "low_priority_ratio": 0.5,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.03333333333333333
+      },
+      "action": "DEESCALATE",
+      "action_id": 2,
+      "action_probabilities": [
+        0.07314428096819015,
+        0.31269049096870727,
+        0.6141652280631026
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 0
+    },
+    {
+      "t": 69.0,
+      "observation": {
+        "ewma_occupancy": 0.3240047910151181,
+        "congestion_state": 0.0,
+        "high_priority_ratio": 0.4444444444444444,
+        "low_priority_ratio": 0.5555555555555556,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.06666666666666667
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.28763932327563285,
+        0.5676788110838471,
+        0.14468186564052007
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 0
+    },
+    {
+      "t": 70.0,
+      "observation": {
+        "ewma_occupancy": 0.38380316721199864,
+        "congestion_state": 0.0,
+        "high_priority_ratio": 0.4,
+        "low_priority_ratio": 0.6,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.1
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.4306965447454192,
+        0.5147830680814461,
+        0.054520387173134746
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 0
+    },
+    {
+      "t": 71.0,
+      "observation": {
+        "ewma_occupancy": 0.4401803642280381,
+        "congestion_state": 0.0,
+        "high_priority_ratio": 0.5,
+        "low_priority_ratio": 0.5,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.13333333333333333
+      },
+      "action": "ESCALATE",
+      "action_id": 0,
+      "action_probabilities": [
+        0.5782424406591643,
+        0.38897295394582143,
+        0.03278460539501417
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 1
+    },
+    {
+      "t": 72.0,
+      "observation": {
+        "ewma_occupancy": 0.468088083944933,
+        "congestion_state": 0.25,
+        "high_priority_ratio": 0.4,
+        "low_priority_ratio": 0.6,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.03333333333333333
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.14964507835122823,
+        0.8167088154416995,
+        0.03364610620707235
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 1
+    },
+    {
+      "t": 73.0,
+      "observation": {
+        "ewma_occupancy": 0.4493374786123104,
+        "congestion_state": 0.25,
+        "high_priority_ratio": 0.5,
+        "low_priority_ratio": 0.5,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.06666666666666667
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.14290077226656386,
+        0.7944273775753554,
+        0.0626718501580806
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 1
+    },
+    {
+      "t": 74.0,
+      "observation": {
+        "ewma_occupancy": 0.409418423474507,
+        "congestion_state": 0.25,
+        "high_priority_ratio": 0.375,
+        "low_priority_ratio": 0.625,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.1
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.1485954111524994,
+        0.754825785127998,
+        0.09657880371950259
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 1
+    },
+    {
+      "t": 75.0,
+      "observation": {
+        "ewma_occupancy": 0.35661746694392543,
+        "congestion_state": 0.25,
+        "high_priority_ratio": 0.42857142857142855,
+        "low_priority_ratio": 0.5714285714285714,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.13333333333333333
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.10417942575339027,
+        0.602318394287582,
+        0.29350217995902766
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 1
+    },
+    {
+      "t": 76.0,
+      "observation": {
+        "ewma_occupancy": 0.33046605335654955,
+        "congestion_state": 0.25,
+        "high_priority_ratio": 0.2,
+        "low_priority_ratio": 0.8,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.16666666666666666
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.11819524356363863,
+        0.6173373392917227,
+        0.26446741714463856
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 1
+    },
+    {
+      "t": 77.0,
+      "observation": {
+        "ewma_occupancy": 0.40856293182070025,
+        "congestion_state": 0.25,
+        "high_priority_ratio": 0.4444444444444444,
+        "low_priority_ratio": 0.5555555555555556,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.2
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.19186863993098732,
+        0.6370594711894891,
+        0.1710718888795236
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 1
+    },
+    {
+      "t": 78.0,
+      "observation": {
+        "ewma_occupancy": 0.42514995392648997,
+        "congestion_state": 0.25,
+        "high_priority_ratio": 0.5,
+        "low_priority_ratio": 0.5,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.23333333333333334
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.23374350052549528,
+        0.5913574521060163,
+        0.17489904736848846
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 1
+    },
+    {
+      "t": 79.0,
+      "observation": {
+        "ewma_occupancy": 0.4106531588924195,
+        "congestion_state": 0.25,
+        "high_priority_ratio": 0.5,
+        "low_priority_ratio": 0.5,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.26666666666666666
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.22914429051328636,
+        0.5196959508501436,
+        0.25115975863657
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 1
+    },
+    {
+      "t": 80.0,
+      "observation": {
+        "ewma_occupancy": 0.35034903177624604,
+        "congestion_state": 0.25,
+        "high_priority_ratio": 0.3333333333333333,
+        "low_priority_ratio": 0.6666666666666666,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.3
+      },
+      "action": "MAINTAIN",
+      "action_id": 1,
+      "action_probabilities": [
+        0.15136994597180717,
+        0.44219233318791734,
+        0.40643772084027546
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 1
+    },
+    {
+      "t": 81.0,
+      "observation": {
+        "ewma_occupancy": 0.2094095103285891,
+        "congestion_state": 0.25,
+        "high_priority_ratio": 1.0,
+        "low_priority_ratio": 0.0,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.3333333333333333
+      },
+      "action": "DEESCALATE",
+      "action_id": 2,
+      "action_probabilities": [
+        0.023986498903318127,
+        0.055854868670586304,
+        0.9201586324260955
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 0
+    },
+    {
+      "t": 82.0,
+      "observation": {
+        "ewma_occupancy": 0.08814109817430035,
+        "congestion_state": 0.0,
+        "high_priority_ratio": 0.0,
+        "low_priority_ratio": 0.0,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.03333333333333333
+      },
+      "action": "DEESCALATE",
+      "action_id": 2,
+      "action_probabilities": [
+        0.03714802186163785,
+        0.06282862051551402,
+        0.9000233576228481
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 0
+    },
+    {
+      "t": 83.0,
+      "observation": {
+        "ewma_occupancy": 0.10532212917710938,
+        "congestion_state": 0.0,
+        "high_priority_ratio": 0.25,
+        "low_priority_ratio": 0.75,
+        "drop_rate": 0.0,
+        "link_utilisation": 0.9,
+        "time_in_state": 0.06666666666666667
+      },
+      "action": "DEESCALATE",
+      "action_id": 2,
+      "action_probabilities": [
+        0.05611409272354286,
+        0.2802550162170472,
+        0.66363089105941
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 0
+    },
+    {
+      "t": 84.0,
+      "observation": {
+        "ewma_occupancy": 0.09256534661586782,
+        "congestion_state": 0.0,
+        "high_priority_ratio": 0.5,
+        "low_priority_ratio": 0.5,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.1
+      },
+      "action": "DEESCALATE",
+      "action_id": 2,
+      "action_probabilities": [
+        0.024153993944700827,
+        0.11552611323513465,
+        0.8603198928201645
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 0
+    },
+    {
+      "t": 85.0,
+      "observation": {
+        "ewma_occupancy": 0.1335941784866979,
+        "congestion_state": 0.0,
+        "high_priority_ratio": 0.3333333333333333,
+        "low_priority_ratio": 0.6666666666666666,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.13333333333333333
+      },
+      "action": "DEESCALATE",
+      "action_id": 2,
+      "action_probabilities": [
+        0.05160385721191112,
+        0.19593349289627238,
+        0.7524626498918164
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 0
+    },
+    {
+      "t": 86.0,
+      "observation": {
+        "ewma_occupancy": 0.20832014361674006,
+        "congestion_state": 0.0,
+        "high_priority_ratio": 0.4,
+        "low_priority_ratio": 0.6,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.16666666666666666
+      },
+      "action": "DEESCALATE",
+      "action_id": 2,
+      "action_probabilities": [
+        0.11565416110182629,
+        0.2789691737090194,
+        0.6053766651891543
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 0
+    },
+    {
+      "t": 87.0,
+      "observation": {
+        "ewma_occupancy": 0.19082069791839865,
+        "congestion_state": 0.0,
+        "high_priority_ratio": 0.4,
+        "low_priority_ratio": 0.6,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.2
+      },
+      "action": "DEESCALATE",
+      "action_id": 2,
+      "action_probabilities": [
+        0.09411755271905331,
+        0.2168543510806855,
+        0.6890280962002613
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 0
+    },
+    {
+      "t": 88.0,
+      "observation": {
+        "ewma_occupancy": 0.25457732599121835,
+        "congestion_state": 0.0,
+        "high_priority_ratio": 0.42857142857142855,
+        "low_priority_ratio": 0.5714285714285714,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.23333333333333334
+      },
+      "action": "DEESCALATE",
+      "action_id": 2,
+      "action_probabilities": [
+        0.21049450326034422,
+        0.28923183088899473,
+        0.500273665850661
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 0
+    },
+    {
+      "t": 89.0,
+      "observation": {
+        "ewma_occupancy": 0.2727346118997071,
+        "congestion_state": 0.0,
+        "high_priority_ratio": 0.42857142857142855,
+        "low_priority_ratio": 0.5714285714285714,
+        "drop_rate": 0.0,
+        "link_utilisation": 1.0,
+        "time_in_state": 0.26666666666666666
+      },
+      "action": "DEESCALATE",
+      "action_id": 2,
+      "action_probabilities": [
+        0.27232825578304093,
+        0.2832786646745312,
+        0.4443930795424279
+      ],
+      "action_mask": [
+        true,
+        true,
+        true
+      ],
+      "state_after": 0
+    }
+  ]
+}
