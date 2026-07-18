@@ -146,6 +146,20 @@ Fase 2.
   simulatore: normalmente è permesso solo `MAINTAIN`; con occupancy grezza
   almeno pari al 95% rimane consentito anche `ESCALATE`. Questo impedisce
   oscillazioni rapide senza bloccare la risposta alle emergenze.
+- **Guardrail anti-compressione-a-vuoto.** La policy è addestrata in un
+  simulatore dove la compressione è *non distruttiva* (riduce solo il tempo di
+  servizio in coda), quindi impara a comprimere volentieri; sull'emulatore la
+  compressione *tronca il payload* e aggiunge la latenza del middlebox NFQUEUE.
+  Comprimere quando non si stanno perdendo pacchetti butta throughput senza
+  migliorare il PDR (scenario 2 *flash crowd*). La `mappo_action_mask` blocca
+  quindi l'`ESCALATE` finché non c'è **pressione di perdita reale**
+  (`drop_rate` sopra soglia) o la coda è in emergenza (occupancy ≥ 95%).
+  L'occupancy da sola non basta come segnale: nello scenario 2 la coda sta al
+  60-75% anche a rete scarica (il flusso `control` è ~2500 pkt/s di pacchetti
+  piccoli che la tengono "in piedi" senza traboccare). Il gate agisce solo da
+  limite superiore — `MAINTAIN`/`DE-ESCALATE` sono sempre consentiti — ed è
+  disattivabile per un confronto A/B con la variabile d'ambiente
+  `EDS_MAPPO_GATE=0`.
 
 Per salvare le osservazioni, le probabilità, la maschera e l'azione realmente
 usate durante un run:

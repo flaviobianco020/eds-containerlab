@@ -53,6 +53,27 @@ MAPPO_T_MAX_STATE = 30.0   # normalizzazione t_stato/T_max (doc Tabella 7)
 MAPPO_CAP_BPS     = 10e6   # capacita' nominale del collo di bottiglia (10 Mbit/s)
 MAPPO_EMERGENCY_OCCUPANCY = 0.95
 MAPPO_ACTION_NAMES = ("ESCALATE", "MAINTAIN", "DEESCALATE")
+
+# --- Fase 3: guardrail anti-compressione-a-vuoto (deploy-side) --------------
+# La policy MAPPO e' addestrata in un simulatore dove la compressione e' NON
+# distruttiva: riduce solo il tempo di servizio in coda (simulator/control/
+# compressor.py imposta pkt.compressed_size SENZA toccare pkt.size). Li'
+# comprimere e' quasi gratis, quindi la policy comprime volentieri. Sull'emulatore
+# la compressione e' DISTRUTTIVA (eds_compressor.py tronca il payload) e ogni
+# pacchetto paga la latenza del middlebox NFQUEUE: comprimere quando NON stiamo
+# perdendo pacchetti butta throughput senza migliorare il PDR (scenario 2).
+#
+# NB: l'occupancy NON e' un buon segnale per "serve comprimere?": nello scenario 2
+# la coda sta stabilmente al 60-75% anche a rete scarica (il flusso CONTROL e'
+# ~2500 pkt/s di pacchetti piccoli che tengono una coda "in piedi" ma senza
+# traboccare -> drop~0, PDR~100%). Il segnale corretto e' la PRESSIONE DI PERDITA:
+# si permette l'ESCALATE solo se stiamo davvero scartando pacchetti (drop_rate
+# oltre soglia) o la coda e' in emergenza. Cosi' scenario 2 (drop~0) non comprime
+# mai, scenario 1/5 (overload, drop pesante) comprimono come prima.
+#
+# Disattivabile per confronto A/B con EDS_MAPPO_GATE=0.
+MAPPO_COMPRESSION_GATE = os.environ.get("EDS_MAPPO_GATE", "1") != "0"
+MAPPO_GATE_DROP_RATE = 0.01   # frazione di arrivi persi oltre cui l'ESCALATE e' giustificato
 MAPPO_TRACE_FEATURES = (
     "ewma_occupancy", "congestion_state", "high_priority_ratio",
     "low_priority_ratio", "drop_rate", "link_utilisation", "time_in_state",
@@ -96,13 +117,27 @@ def parse_qdisc_stats(output: str, queue_limit: int,
 
 
 def mappo_action_mask(now: float, last_transition: float,
-                      min_state_dwell: float, occupancy: float) -> list[bool]:
-    """Vincolo di deploy identico al simulatore robusto."""
-    if min_state_dwell <= 0.0 or now - last_transition >= min_state_dwell:
-        return [True, True, True]
-    if occupancy >= MAPPO_EMERGENCY_OCCUPANCY:
-        return [True, True, False]
-    return [False, True, False]
+                      min_state_dwell: float, occupancy: float,
+                      drop_rate: float = 0.0) -> list[bool]:
+    """Vincolo di deploy identico al simulatore robusto, piu' il guardrail
+    anti-compressione-a-vuoto (vedi MAPPO_COMPRESSION_GATE).
+
+    Ordine azioni: [ESCALATE, MAINTAIN, DEESCALATE].
+    """
+    dwell_ok = min_state_dwell <= 0.0 or now - last_transition >= min_state_dwell
+    if not dwell_ok:
+        # Congelamento durante il dwell (come nel simulatore robusto), con
+        # override di emergenza che lascia salire se la coda e' quasi piena.
+        if occupancy >= MAPPO_EMERGENCY_OCCUPANCY:
+            return [True, True, False]
+        return [False, True, False]
+    # Dwell soddisfatto: azioni libere, MA niente ESCALATE "a vuoto". Comprimere
+    # ha senso solo sotto pressione di perdita reale (o emergenza coda); senza,
+    # un ESCALATE riduce solo il throughput a PDR gia' pieno.
+    escalate_ok = (not MAPPO_COMPRESSION_GATE
+                   or drop_rate > MAPPO_GATE_DROP_RATE
+                   or occupancy >= MAPPO_EMERGENCY_OCCUPANCY)
+    return [escalate_ok, True, True]
 
 # ----------------------- Traffic classes / FlowModel ------------------------
 # Rispecchiano le classi usate in examples/scenarios.py del simulatore.
@@ -645,6 +680,12 @@ def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
               f"(episodio {meta.get('episode','?')}, "
               f"λ_stab={meta.get('stability_penalty', 0.0)}, "
               f"dwell={min_state_dwell:.1f}s)")
+        if MAPPO_COMPRESSION_GATE:
+            print(f"  guardrail compressione: ATTIVO  (ESCALATE solo se drop_rate>"
+                  f"{MAPPO_GATE_DROP_RATE:.0%} o occ>={MAPPO_EMERGENCY_OCCUPANCY:.0%};"
+                  f" EDS_MAPPO_GATE=0 per disattivare)")
+        else:
+            print("  guardrail compressione: DISATTIVO  (EDS_MAPPO_GATE=0)")
     elif enable_phase2:
         sm = CongestionStateMachine(
             ewma_alpha=PHASE2_EWMA_ALPHA,
@@ -768,7 +809,8 @@ def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
             t_in_state,                              # t_stato / T_max
         ]
         action_mask = mappo_action_mask(
-            now, mstate["last_transition"], min_state_dwell, st["occupancy"])
+            now, mstate["last_transition"], min_state_dwell, st["occupancy"],
+            drop_rate=drop_rate)
         action_probs = actor.probs(obs, action_mask=action_mask)
         action = actor.act(obs, action_mask=action_mask)
 
