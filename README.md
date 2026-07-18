@@ -160,6 +160,21 @@ Fase 2.
   limite superiore — `MAINTAIN`/`DE-ESCALATE` sono sempre consentiti — ed è
   disattivabile per un confronto A/B con la variabile d'ambiente
   `EDS_MAPPO_GATE=0`.
+- **Copertura della compressione e diagnostica.** In overload pesante (scenari 1
+  e 5) il PDR resta al bound "senza compressione": la compressione non svuota la
+  coda. Due leve/strumenti per indagarlo:
+  - `EDS_NFQUEUE_MINLEN` (default 500) regola la dimensione IP minima dei
+    pacchetti inviati al compressore. A 500 solo i `video` vengono compressi; a
+    ~200 entra anche la `telemetry` (dati strutturati, comprime ~4×), che alza il
+    bound teorico del PDR dello scenario 5 verso il 100% — al costo di più carico
+    sul compressore userspace.
+  - A fine run (Fase 2/3) l'emulatore stampa nel log del run i contatori reali
+    del compressore: `ratio_reale_sul_filo` (`bytes_in/bytes_out`), la
+    percentuale di pacchetti effettivamente troncati e il `bypass` (pacchetti che
+    hanno fatto match sulla regola ma sono passati non compressi perché il
+    compressore non reggeva il rate). Servono a distinguere se la compressione
+    "non morde" perché il controller non arriva agli stati profondi o perché il
+    middlebox userspace è saturo.
 
 Per salvare le osservazioni, le probabilità, la maschera e l'azione realmente
 usate durante un run:
