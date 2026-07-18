@@ -49,6 +49,18 @@ agente di traffico nei container (`agent/eds_node.py`):
 > 1:1 in Mbit/s (capacità collo di bottiglia 10 → 10 Mbit/s), così i rapporti
 > carico/capacità di ogni scenario restano identici (es. scenario 1: 8+5 vs 10).
 
+> **Collo di bottiglia byte-limited (parità col simulatore).** Il collo è
+> `tbf 10Mbit` + `netem limit 20` **senza ritardo** (drop-tail puro): il vincolo
+> è la **banda** e il servizio è ∝ byte, esattamente come `QueueManager` nel
+> simulatore — così la compressione riduce i byte e fa passare più pacchetti. Un
+> ritardo sul netem del collo, invece, per la legge di Little consumerebbe il
+> buffer da 20 pacchetti (`in volo = rate × delay`) rendendo il collo
+> *packet-limited* (satura a `limit/delay`, indipendente dai byte): la
+> compressione non svuoterebbe mai la coda. Per questo la **latenza del link**
+> (~5ms) è modellata sui **link di accesso** (`deploy.sh`), non sul collo. Per
+> riprodurre il vecchio comportamento packet-limited a scopo di confronto:
+> `EDS_BOTTLENECK_DELAY=5ms`.
+
 ## Prerequisiti
 
 - [Docker](https://docs.docker.com/engine/install/)

@@ -70,20 +70,30 @@ add_route() {
 
 # shape_bottleneck <node> <iface> [rate] [delay]
 # Link da 10 Mbps: tbf root (rate + fix del burst "burst 1mbit") e netem come
-# qdisc figlia per il ritardo e per la coda finita "limit $QUEUE_LIMIT"
-# (drop-tail), che riproduce i drop di QueueManager.enqueue() quando la coda
-# è piena. Il tbf ha un limit ampio così i drop avvengono nel netem (a numero
-# di pacchetti), esattamente come nel simulatore.
+# qdisc figlia per la coda finita "limit $QUEUE_LIMIT" (drop-tail), che riproduce
+# i drop di QueueManager.enqueue() quando la coda è piena.
+#
+# IMPORTANTE — delay=0 di default (collo BYTE-limited). Con un ritardo sul netem,
+# per la legge di Little i pacchetti "in volo" sono rate*delay: con `limit 20` il
+# ritardo si mangia il buffer e il collo satura a limit/delay pkt/s
+# INDIPENDENTEMENTE dai byte, così la compressione non svuota mai la coda (il
+# servizio diventa ∝ pacchetti invece che ∝ byte come nel simulatore). Con
+# delay=0 il buffer è un drop-tail puro e il vincolo torna la banda (tbf): la
+# compressione riduce i byte -> più pacchetti passano -> il PDR risponde, in
+# parità col simulatore. La latenza del link è modellata sui link di accesso.
 shape_bottleneck() {
-  local node="$1" iface="$2" rate="${3:-10mbit}" delay="${4:-5ms}"
+  local node="$1" iface="$2" rate="${3:-10mbit}" delay="${4:-0ms}"
   cexec "$node" "tc qdisc replace dev $iface root handle 1: tbf rate $rate burst 1mbit limit 1m"
   cexec "$node" "tc qdisc replace dev $iface parent 1:1 handle 10: netem delay $delay limit $QUEUE_LIMIT"
 }
 
 # shape_access <node> <iface> [delay]
-# Link di accesso ad alta capacità: solo netem, nessun tbf.
+# Link di accesso ad alta capacità: solo netem, nessun tbf. Qui vive la LATENZA
+# del percorso (default 5ms), spostata qui dal collo di bottiglia così il
+# drop-tail del collo resta puro (vedi shape_bottleneck). Alta capacità + limit
+# netem ampio => nessun drop introdotto.
 shape_access() {
-  local node="$1" iface="$2" delay="${3:-1ms}"
+  local node="$1" iface="$2" delay="${3:-5ms}"
   cexec "$node" "tc qdisc replace dev $iface root netem delay $delay"
 }
 
