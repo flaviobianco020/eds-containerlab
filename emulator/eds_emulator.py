@@ -459,9 +459,27 @@ class Net:
                 f"python3 {COMPRESSOR_PATH} {NFQUEUE_NUM} "
                 f"> /tmp/eds_comp.log 2>&1 & echo $! > /tmp/eds_comp.pid")
         time.sleep(0.8)  # attendi avvio processo
-        if self.verbose:
-            r = self.sh(node, "cat /tmp/eds_comp.log")
-            print(f"      [compressor] {(r.stdout or '').strip()}")
+        # Health-check: se il processo e' morto all'avvio (es. import fallito dopo
+        # un'installazione flaky), rimuovo la regola -> fail-open REALE. Con la
+        # regola presente e nessun consumatore, --queue-bypass dovrebbe bastare,
+        # ma togliere la regola elimina ogni rischio di black-hole residuo.
+        alive = self.sh(node,
+                        "pid=$(cat /tmp/eds_comp.pid 2>/dev/null); "
+                        "[ -n \"$pid\" ] && kill -0 \"$pid\" 2>/dev/null "
+                        "&& echo alive || echo dead")
+        log = self.sh(node, "cat /tmp/eds_comp.log")
+        if "alive" not in (alive.stdout or ""):
+            print("      [compressor] AVVISO: processo non attivo dopo lo start "
+                  "-> rimuovo la regola NFQUEUE (fail-open).")
+            print(f"      [compressor:log] {(log.stdout or '').strip()}")
+            self.sh(node, f"iptables -D {self._comp_rule} 2>/dev/null || true")
+            self._comp_rule = None
+        else:
+            nfq = self.nfqueue_stats()
+            bound = "si" if (nfq and nfq.get("peer_portid", 0) != 0) else "NO"
+            if self.verbose:
+                print(f"      [compressor] {(log.stdout or '').strip()}  "
+                      f"(pid vivo, coda bound: {bound})")
 
     def update_compression_state(self, state_value: int):
         """
@@ -470,6 +488,29 @@ class Net:
         """
         self.sh(self.topo.bottleneck_node,
                 f"echo {state_value} > {COMP_STATE_FILE}")
+
+    def nfqueue_stats(self) -> Optional[dict]:
+        """Legge /proc/net/netfilter/nfnetlink_queue per la coda NFQUEUE_NUM.
+
+        Colonne: queue_num peer_portid queue_total copy_mode copy_range
+                 queue_dropped user_dropped id_sequence.
+
+        Diagnostica del middlebox (scenario 5 Fase 2, "run anomalo"):
+          * riga assente / peer_portid == 0  -> NESSUN consumatore bound
+            (--queue-bypass fa passare i pacchetti: fail-open).
+          * peer_portid != 0 + queue_dropped che cresce -> consumatore bound ma
+            STUCK: il kernel scarta i pacchetti a coda piena (black-hole). E' il
+            caso che --queue-bypass NON copre.
+        Ritorna None se la coda non e' bound.
+        """
+        r = self.sh(self.topo.bottleneck_node,
+                    "cat /proc/net/netfilter/nfnetlink_queue 2>/dev/null || true")
+        for line in (r.stdout or "").splitlines():
+            f = line.split()
+            if len(f) >= 7 and f[0] == str(NFQUEUE_NUM):
+                return {"peer_portid": int(f[1]), "queue_total": int(f[2]),
+                        "queue_dropped": int(f[5]), "user_dropped": int(f[6])}
+        return None
 
     def stop_compressor(self):
         """Rimuove la regola iptables (match esatto) e termina il compressore."""
@@ -901,6 +942,26 @@ def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
     for th in threads:
         th.join(timeout=40)
     if enable_phase2 or mappo_mode:
+        # Diagnostica middlebox PRIMA di fermarlo: cattura nel log del run se la
+        # coda NFQUEUE ha fatto black-hole (queue_dropped) o non era bound. E' la
+        # prova che conferma/smentisce il "run anomalo" dello scenario 5 Fase 2.
+        nfq_end = net.nfqueue_stats()
+        if nfq_end is None:
+            print("  [nfqueue] coda NON bound a fine run (nessun consumatore; "
+                  "--queue-bypass attivo, pacchetti passati non compressi).")
+        else:
+            print(f"  [nfqueue] peer_portid={nfq_end['peer_portid']}  "
+                  f"queue_total={nfq_end['queue_total']}  "
+                  f"queue_dropped={nfq_end['queue_dropped']}  "
+                  f"user_dropped={nfq_end['user_dropped']}")
+            if nfq_end["queue_dropped"] > 0:
+                print("  [nfqueue] ATTENZIONE: queue_dropped>0 -> il compressore "
+                      "non ha retto il rate: pacchetti scartati dal kernel a coda "
+                      "piena (black-hole; --queue-bypass NON copre questo caso).")
+        log = net.sh(net.topo.bottleneck_node, "cat /tmp/eds_comp.log 2>/dev/null")
+        tail = (log.stdout or "").strip().splitlines()[-5:]
+        if tail:
+            print("  [compressor:log] " + " | ".join(tail))
         net.stop_compressor()
     net.apply_drop_low_priority(False)  # ripulisce i filtri tc
     stats1 = net.qdisc_stats()
@@ -919,7 +980,22 @@ def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
             }, fh, indent=2)
         print(f"  traccia MAPPO salvata: {os.path.abspath(mappo_trace_path)}")
 
-    return _summarize(topo, flows, results, metrics, stats0, stats1, end_time)
+    summary = _summarize(topo, flows, results, metrics, stats0, stats1, end_time)
+    # Rilevamento "run anomalo": consegna quasi nulla (come lo scenario 5 Fase 2
+    # rep 1: throughput 0.06, 0 transizioni). Reso rumoroso nel log invece di
+    # sparire come un throughput ~0 medio nel benchmark.
+    if summary["generated"] > 100 and summary["packet_delivery_ratio"] < 0.1:
+        print("  " + "!" * 66)
+        print(f"  RUN ANOMALO: consegnato solo "
+              f"{summary['packet_delivery_ratio']*100:.1f}% dei pacchetti generati.")
+        if enable_phase2 or mappo_mode:
+            print("  Sospetto principale: middlebox NFQUEUE (compressore stuck o "
+                  "morto). Vedi [nfqueue] e [compressor:log] qui sopra.")
+        else:
+            print("  Sospetto principale: ricevitore o forwarding (nessun "
+                  "middlebox in questa modalita').")
+        print("  " + "!" * 66)
+    return summary
 
 
 def _parse_json(text: str) -> Optional[dict]:
