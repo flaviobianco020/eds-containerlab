@@ -22,6 +22,7 @@ Uso:
 """
 from __future__ import annotations
 import os
+import signal
 import struct
 import sys
 
@@ -61,6 +62,7 @@ _RATIOS: dict[tuple[int, int], float] = {
 _TOS_TO_PRIORITY: dict[int, int] = {0xc0: 0, 0x40: 1, 0x28: 2}
 
 STATE_FILE = "/tmp/eds_comp_state"
+STATS_FILE = "/tmp/eds_comp_stats"   # contatori di diagnostica (pkts/bytes_in/out/compressed)
 
 
 def _read_state() -> int:
@@ -150,13 +152,44 @@ def main():
         )
         sys.exit(1)
 
+    # Contatori di diagnostica (scenario 1/5: capire se la compressione morde).
+    #   pkts       = pacchetti effettivamente processati in userspace
+    #   bytes_in   = byte IP totali ricevuti (pre-compressione)
+    #   bytes_out  = byte IP totali dopo la compressione
+    #   compressed = pacchetti in cui il payload e' stato davvero troncato
+    # Confrontando pkts con il contatore della regola iptables (lato control-plane)
+    # si misura il BYPASS (--queue-bypass) sotto carico; bytes_in/bytes_out da' il
+    # ratio REALE sul filo (indipendente dal mix di classi).
+    stats = {"pkts": 0, "bytes_in": 0, "bytes_out": 0, "compressed": 0}
+
+    def _flush_stats():
+        try:
+            with open(STATS_FILE, "w") as fh:
+                fh.write("{pkts} {bytes_in} {bytes_out} {compressed}".format(**stats))
+        except OSError:
+            pass
+
     def _callback(nfpkt):
         try:
-            compressed = _compress(nfpkt.get_payload())
+            raw = nfpkt.get_payload()
+            compressed = _compress(raw)
             nfpkt.set_payload(compressed)
+            stats["pkts"] += 1
+            stats["bytes_in"] += len(raw)
+            stats["bytes_out"] += len(compressed)
+            if len(compressed) < len(raw):
+                stats["compressed"] += 1
+            if stats["pkts"] % 200 == 0:   # flush periodico (poco I/O)
+                _flush_stats()
         except Exception as exc:  # noqa: BLE001
             sys.stderr.write(f"[compressor] errore pacchetto: {exc}\n")
         nfpkt.accept()
+
+    def _on_term(*_a):
+        _flush_stats()
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, _on_term)
 
     nfq = NetfilterQueue()
     nfq.bind(queue_num, _callback)
@@ -170,8 +203,12 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        _flush_stats()
         nfq.unbind()
-        print("[compressor] terminato.", flush=True)
+        print(f"[compressor] terminato. pkts={stats['pkts']} "
+              f"compressed={stats['compressed']} "
+              f"bytes_in={stats['bytes_in']} bytes_out={stats['bytes_out']}",
+              flush=True)
 
 
 if __name__ == "__main__":

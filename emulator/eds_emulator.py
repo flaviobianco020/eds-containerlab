@@ -45,7 +45,16 @@ if _AGENT_DIR not in sys.path:
 AGENT_PATH      = "/opt/eds/eds_node.py"
 COMPRESSOR_PATH = "/opt/eds/eds_compressor.py"
 COMP_STATE_FILE = "/tmp/eds_comp_state"
+COMP_STATS_FILE = "/tmp/eds_comp_stats"
 NFQUEUE_NUM     = 1
+
+# Lunghezza IP minima (byte) per cui un pacchetto passa dal compressore NFQUEUE.
+# Default 500: solo VIDEO (>=~1428B) viene compresso; CONTROL (128B) e TELEMETRY
+# (228-328B) bypassano, per non caricare lo userspace. Abbassandola a ~200 anche
+# TELEMETRY (dati strutturati, comprime ~4x) entra: leva per il PDR dello
+# scenario 5 (bound teorico ->100%), al costo di piu' carico sul compressore.
+#   EDS_NFQUEUE_MINLEN=200 python3 emulator/scenarios.py 5 --phase2
+NFQUEUE_MINLEN  = int(os.environ.get("EDS_NFQUEUE_MINLEN", "500"))
 
 # --- Fase 3: parametri di osservazione dell'Actor (specchio di simulator/marl/env.py)
 MAPPO_DT          = 1.0    # cadenza di decisione della policy: 1 s (== env.DT)
@@ -448,8 +457,9 @@ class Net:
         # Solo pacchetti >= 500 byte (IP totale) passano per NFQUEUE.
         # I pacchetti CONTROL (100 B payload = 128 B IP) passano direttamente:
         # riduce il carico sul processo Python userspace di ~90%.
+        self.sh(node, f"rm -f {COMP_STATS_FILE}")  # azzera i contatori del run precedente
         self._comp_rule = (f"FORWARD -o {iface} -p udp --dport {port} "
-                           f"-m length --length 500:65535 "
+                           f"-m length --length {NFQUEUE_MINLEN}:65535 "
                            f"-j NFQUEUE --queue-num {NFQUEUE_NUM} --queue-bypass")
         # rimuove eventuali regole residue da run precedenti, poi aggiunge
         self.sh(node, f"iptables -D {self._comp_rule} 2>/dev/null || true")
@@ -510,6 +520,34 @@ class Net:
             if len(f) >= 7 and f[0] == str(NFQUEUE_NUM):
                 return {"peer_portid": int(f[1]), "queue_total": int(f[2]),
                         "queue_dropped": int(f[5]), "user_dropped": int(f[6])}
+        return None
+
+    def compressor_stats(self) -> Optional[dict]:
+        """Legge i contatori scritti da eds_compressor.py in COMP_STATS_FILE:
+        pkts (processati) bytes_in bytes_out compressed. Ratio reale sul filo =
+        bytes_in/bytes_out. Ritorna None se il file non c'e'."""
+        r = self.sh(self.topo.bottleneck_node,
+                    f"cat {COMP_STATS_FILE} 2>/dev/null || true")
+        parts = (r.stdout or "").split()
+        if len(parts) < 4:
+            return None
+        try:
+            return {"pkts": int(parts[0]), "bytes_in": int(parts[1]),
+                    "bytes_out": int(parts[2]), "compressed": int(parts[3])}
+        except ValueError:
+            return None
+
+    def nfqueue_rule_matched(self) -> Optional[int]:
+        """Pacchetti che hanno fatto match sulla regola NFQUEUE (contatore
+        iptables). Confrontato con compressor_stats()['pkts'] misura il BYPASS:
+        matched - processati = pacchetti passati non compressi (--queue-bypass)."""
+        r = self.sh(self.topo.bottleneck_node,
+                    "iptables -nvxL FORWARD 2>/dev/null || true")
+        for line in (r.stdout or "").splitlines():
+            if f"NFQUEUE num {NFQUEUE_NUM}" in line:
+                f = line.split()
+                if len(f) >= 1 and f[0].isdigit():
+                    return int(f[0])   # colonna 'pkts' di iptables -v
         return None
 
     def stop_compressor(self):
@@ -710,6 +748,9 @@ def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
     if enable_phase2 or mappo_mode:
         net.install_compressor_deps()
         net.start_compressor(port=port)
+        classes = "VIDEO" if NFQUEUE_MINLEN > 328 else "VIDEO+TELEMETRY"
+        print(f"  compressore NFQUEUE: soglia min {NFQUEUE_MINLEN}B -> comprime "
+              f"{classes}  (EDS_NFQUEUE_MINLEN per cambiarla)")
 
     if mappo_mode:
         # macchina di stato PASSIVA: aggiorna solo l'EWMA, non transisce da sola;
@@ -958,6 +999,29 @@ def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
                 print("  [nfqueue] ATTENZIONE: queue_dropped>0 -> il compressore "
                       "non ha retto il rate: pacchetti scartati dal kernel a coda "
                       "piena (black-hole; --queue-bypass NON copre questo caso).")
+        # Compressione REALE sul filo + bypass: risponde a "perche' il PDR di
+        # scenario 1/5 non sale?". ratio_reale = bytes_in/bytes_out (deep vs no-op);
+        # bypass = pacchetti che hanno fatto match ma NON sono stati compressi
+        # (--queue-bypass sotto carico) = matched - processati.
+        cs = net.compressor_stats()
+        matched = net.nfqueue_rule_matched()
+        if cs is not None:
+            ratio = (cs["bytes_in"] / cs["bytes_out"]) if cs["bytes_out"] else 1.0
+            frac_c = (cs["compressed"] / cs["pkts"] * 100.0) if cs["pkts"] else 0.0
+            line = (f"  [compressor] processati={cs['pkts']}  ratio_reale_sul_filo="
+                    f"{ratio:.3f}x  troncati={frac_c:.0f}%")
+            if matched is not None:
+                bypass = max(matched - cs["pkts"], 0)
+                bp = (bypass / matched * 100.0) if matched else 0.0
+                line += f"  matched={matched}  bypass={bypass} ({bp:.0f}%)"
+            print(line)
+            if matched and (matched - cs["pkts"]) > 0.2 * matched:
+                print("  [compressor] NB: bypass elevato -> il compressore userspace "
+                      "non regge il rate; molti pacchetti passano NON compressi "
+                      "(spiega perche' la compressione non svuota la coda).")
+            elif ratio < 1.05:
+                print("  [compressor] NB: ratio reale ~1.0 -> il controller NON sta "
+                      "raggiungendo/mantenendo uno stato di compressione profonda.")
         log = net.sh(net.topo.bottleneck_node, "cat /tmp/eds_comp.log 2>/dev/null")
         tail = (log.stdout or "").strip().splitlines()[-5:]
         if tail:
