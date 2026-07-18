@@ -56,6 +56,16 @@ NFQUEUE_NUM     = 1
 #   EDS_NFQUEUE_MINLEN=200 python3 emulator/scenarios.py 5 --phase2
 NFQUEUE_MINLEN  = int(os.environ.get("EDS_NFQUEUE_MINLEN", "500"))
 
+# Ritardo della netem sul collo di bottiglia. Il default 5ms replica la latenza
+# del link, MA con `limit 20` il ritardo "consuma" il buffer: per la legge di
+# Little i pacchetti in volo sono rate*delay, quindi il collo satura a
+# limit/delay = 20/5ms ~ 4000 pkt/s, INDIPENDENTE dai byte -> la compressione
+# non alza il PDR (scenari 1/5). Abbassandolo (es. 0ms/1ms) il buffer torna un
+# drop-tail puro e il vincolo torna la banda (tbf): la compressione riprende a
+# svuotare la coda. Diagnostico/leva, default invariato.
+#   EDS_BOTTLENECK_DELAY=0ms python3 emulator/scenarios.py 1 --mappo CKPT
+BOTTLENECK_DELAY = os.environ.get("EDS_BOTTLENECK_DELAY", "5ms")
+
 # --- Fase 3: parametri di osservazione dell'Actor (specchio di simulator/marl/env.py)
 MAPPO_DT          = 1.0    # cadenza di decisione della policy: 1 s (== env.DT)
 MAPPO_T_MAX_STATE = 30.0   # normalizzazione t_stato/T_max (doc Tabella 7)
@@ -730,8 +740,13 @@ def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
     print("=" * 70)
     net.preflight()
     net.cleanup_stale(port=port)
-    if queue_limit is not None:
-        net.set_queue_limit(queue_limit)
+    # Applica sempre (ri)configurazione della netem del collo di bottiglia col
+    # ritardo scelto (default 5ms = deploy.sh). Con EDS_BOTTLENECK_DELAY basso il
+    # buffer torna drop-tail puro e la compressione torna efficace (vedi costante).
+    net.set_queue_limit(topo.queue_limit, delay=BOTTLENECK_DELAY)
+    if BOTTLENECK_DELAY != "5ms":
+        print(f"  collo di bottiglia: netem delay {BOTTLENECK_DELAY} limit "
+              f"{topo.queue_limit}  (EDS_BOTTLENECK_DELAY)")
 
     mappo_mode = mappo_ckpt is not None
     actor = None
