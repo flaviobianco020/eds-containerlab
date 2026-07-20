@@ -71,7 +71,7 @@ BOTTLENECK_DELAY = os.environ.get("EDS_BOTTLENECK_DELAY", "0ms")
 MAPPO_DT          = 1.0    # cadenza di decisione della policy: 1 s (== env.DT)
 MAPPO_T_MAX_STATE = 30.0   # normalizzazione t_stato/T_max (doc Tabella 7)
 MAPPO_CAP_BPS     = 10e6   # capacita' nominale del collo di bottiglia (10 Mbit/s)
-MAPPO_EMERGENCY_OCCUPANCY = 0.95
+MAPPO_EMERGENCY_OCCUPANCY = float(os.environ.get("EDS_MAPPO_EMERGENCY_OCC", "0.95"))
 MAPPO_ACTION_NAMES = ("ESCALATE", "MAINTAIN", "DEESCALATE")
 
 # --- Fase 3: guardrail anti-compressione-a-vuoto (deploy-side) --------------
@@ -93,7 +93,7 @@ MAPPO_ACTION_NAMES = ("ESCALATE", "MAINTAIN", "DEESCALATE")
 #
 # Disattivabile per confronto A/B con EDS_MAPPO_GATE=0.
 MAPPO_COMPRESSION_GATE = os.environ.get("EDS_MAPPO_GATE", "1") != "0"
-MAPPO_GATE_DROP_RATE = 0.01   # frazione di arrivi persi oltre cui l'ESCALATE e' giustificato
+MAPPO_GATE_DROP_RATE = float(os.environ.get("EDS_MAPPO_GATE_DROP_RATE", "0.01"))  # frazione di arrivi persi oltre cui l'ESCALATE e' giustificato (sweep con EDS_MAPPO_GATE_DROP_RATE)
 MAPPO_TRACE_FEATURES = (
     "ewma_occupancy", "congestion_state", "high_priority_ratio",
     "low_priority_ratio", "drop_rate", "link_utilisation", "time_in_state",
@@ -760,6 +760,9 @@ def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
         actor = MappoActor.from_checkpoint(mappo_ckpt)
         min_state_dwell = float(getattr(actor, "meta", {}).get(
             "min_state_dwell", 0.0))
+        # override per gli esperimenti sui knob di deploy (senza ri-esportare il ckpt)
+        if os.environ.get("EDS_MAPPO_DWELL") is not None:
+            min_state_dwell = float(os.environ["EDS_MAPPO_DWELL"])
 
     # La Fase 2 e la Fase 3 usano la stessa infrastruttura di compressione
     # (middlebox NFQUEUE): cambia solo CHI decide lo stato. In Fase 3 e' l'Actor.
