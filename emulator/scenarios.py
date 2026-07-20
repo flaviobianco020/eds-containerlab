@@ -19,6 +19,7 @@ Uso:
     4  link_failure_recovery  - link giu' a t=30, su a t=55
     5  persistent_overload    - 3 flussi, overload sostenuto (load 15)
     6  mixed_telemetry_video  - 3 classi con priorita' (control protetto)
+    7  oscillante             - impulsi collo 10->4 per 3s ogni 7s (carico 9)
 
 Modalita' di controllo (alternative):
     (nessuna)        FASE 1 - transizioni di stato istantanee sull'occupancy
@@ -116,9 +117,32 @@ def scenario_6(k, phase2=False, mappo=None, trace=None):
                          title="Scenario 6 - Mixed Telemetry & Video (control protetto)")
 
 
+def scenario_7(k, phase2=False, mappo=None, trace=None):
+    """Oscillante: impulsi di congestione brevi (collo 10->4 per 3s) ogni 7s, con
+    carico fisso 9 (VIDEO 7 + CONTROL 2). Il collo lampeggia sotto/sopra il carico,
+    costringendo la policy a salire e scendere in fretta: qui il dwell e la soglia
+    del guardrail diventano vincolanti (a differenza degli scenari canonici, che
+    non oscillano -> Esperimenti A/B piatti)."""
+    end = 80.0 * k
+    flows = [
+        FlowSpec(0, "src0", FlowModel.POISSON, 7.0, VIDEO,   0.0, end),
+        FlowSpec(1, "src1", FlowModel.CONTROL, 2.0, CONTROL, 0.0, end),
+    ]
+    events = []
+    t = 10.0 * k
+    while t < end - 4.0 * k:
+        events.append((t, "rate", 4.0))             # impulso: collo sotto il carico
+        events.append((t + 3.0 * k, "rate", 10.0))  # ripristino
+        t += 7.0 * k
+    return run_emulation(TOPO, flows, events, end, metric_interval=5.0 * k,
+                         enable_phase2=phase2, mappo_ckpt=mappo, mappo_trace_path=trace,
+                         title="Scenario 7 - Oscillante (impulsi collo 10->4 x3s ogni 7s)")
+
+
 SCENARIOS = {
     "1": scenario_1, "2": scenario_2, "3": scenario_3,
     "4": scenario_4, "5": scenario_5, "6": scenario_6,
+    "7": scenario_7,
 }
 
 
