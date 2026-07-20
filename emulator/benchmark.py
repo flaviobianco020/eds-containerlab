@@ -55,6 +55,7 @@ import scenarios as scen  # noqa: E402
 SCEN_NAMES = {
     "1": "single bottleneck", "2": "flash crowd", "3": "bandwidth degr.",
     "4": "link fail/recov.", "5": "persistent overload", "6": "mixed traffic",
+    "7": "oscillante",
 }
 MODE_LABEL = {"phase1": "Fase 1", "phase2": "Fase 2", "mappo": "Fase 3"}
 KPIS = [
