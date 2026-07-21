@@ -74,25 +74,28 @@ MAPPO_CAP_BPS     = 10e6   # capacita' nominale del collo di bottiglia (10 Mbit/
 MAPPO_EMERGENCY_OCCUPANCY = float(os.environ.get("EDS_MAPPO_EMERGENCY_OCC", "0.95"))
 MAPPO_ACTION_NAMES = ("ESCALATE", "MAINTAIN", "DEESCALATE")
 
-# --- Fase 3: guardrail anti-compressione-a-vuoto (deploy-side) --------------
-# La policy MAPPO e' addestrata in un simulatore dove la compressione e' NON
-# distruttiva: riduce solo il tempo di servizio in coda (simulator/control/
-# compressor.py imposta pkt.compressed_size SENZA toccare pkt.size). Li'
-# comprimere e' quasi gratis, quindi la policy comprime volentieri. Sull'emulatore
-# la compressione e' DISTRUTTIVA (eds_compressor.py tronca il payload) e ogni
-# pacchetto paga la latenza del middlebox NFQUEUE: comprimere quando NON stiamo
-# perdendo pacchetti butta throughput senza migliorare il PDR (scenario 2).
+# --- Fase 3: guardrail anti-compressione-a-vuoto (deploy-side, OPT-IN) -------
+# STORIA: la policy MAPPO originale (checkpoint "current") era addestrata con una
+# reward SENZA costo di compressione, in un simulatore dove la compressione e' NON
+# distruttiva (simulator/control/compressor.py imposta pkt.compressed_size SENZA
+# toccare pkt.size). Li' comprimere e' quasi gratis, quindi la policy comprimeva
+# volentieri. Sull'emulatore la compressione e' DISTRUTTIVA (eds_compressor.py
+# tronca il payload) e ogni pacchetto paga la latenza del middlebox NFQUEUE:
+# comprimere quando NON stiamo perdendo pacchetti butta throughput senza migliorare
+# il PDR (scenario 2). Per tappare quel comportamento serviva questo guardrail
+# lato deploy: ESCALATE ammesso solo sotto PRESSIONE DI PERDITA reale (drop_rate
+# oltre soglia) o emergenza coda. (L'occupancy da sola NON basta: nello scenario 2
+# la coda sta al 60-75% anche a rete scarica per via del flusso CONTROL, ~2500
+# pkt/s di pacchetti piccoli, senza traboccare -> drop~0, PDR~100%.)
 #
-# NB: l'occupancy NON e' un buon segnale per "serve comprimere?": nello scenario 2
-# la coda sta stabilmente al 60-75% anche a rete scarica (il flusso CONTROL e'
-# ~2500 pkt/s di pacchetti piccoli che tengono una coda "in piedi" ma senza
-# traboccare -> drop~0, PDR~100%). Il segnale corretto e' la PRESSIONE DI PERDITA:
-# si permette l'ESCALATE solo se stiamo davvero scartando pacchetti (drop_rate
-# oltre soglia) o la coda e' in emergenza. Cosi' scenario 2 (drop~0) non comprime
-# mai, scenario 1/5 (overload, drop pesante) comprimono come prima.
-#
-# Disattivabile per confronto A/B con EDS_MAPPO_GATE=0.
-MAPPO_COMPRESSION_GATE = os.environ.get("EDS_MAPPO_GATE", "1") != "0"
+# ORA: il checkpoint "mappo_ccgated" e' addestrato con la reward a COSTO DI
+# COMPRESSIONE GATED (-lambda_c*(mean_state/4)*(1-congestione)): la penalita' si
+# paga solo a rete scarica, azzerandosi sotto congestione. Cosi' la policy
+# autoregola la compressione ALLA SORGENTE e il guardrail lato deploy diventa
+# ridondante (verificato: scenario 2 a gate OFF -> 1.00x, nessuno spreco). Percio'
+# il guardrail e' DISATTIVO di default. Resta come opt-in (EDS_MAPPO_GATE=1) per i
+# checkpoint legacy senza compression-cost, che senza guardrail sprecano su S2.
+MAPPO_COMPRESSION_GATE = os.environ.get("EDS_MAPPO_GATE", "0") != "0"
 MAPPO_GATE_DROP_RATE = float(os.environ.get("EDS_MAPPO_GATE_DROP_RATE", "0.01"))  # frazione di arrivi persi oltre cui l'ESCALATE e' giustificato (sweep con EDS_MAPPO_GATE_DROP_RATE)
 MAPPO_TRACE_FEATURES = (
     "ewma_occupancy", "congestion_state", "high_priority_ratio",
@@ -139,8 +142,10 @@ def parse_qdisc_stats(output: str, queue_limit: int,
 def mappo_action_mask(now: float, last_transition: float,
                       min_state_dwell: float, occupancy: float,
                       drop_rate: float = 0.0) -> list[bool]:
-    """Vincolo di deploy identico al simulatore robusto, piu' il guardrail
-    anti-compressione-a-vuoto (vedi MAPPO_COMPRESSION_GATE).
+    """Vincolo di deploy identico al simulatore robusto (dwell + override di
+    emergenza). Il guardrail anti-compressione-a-vuoto (MAPPO_COMPRESSION_GATE)
+    e' OPT-IN e disattivo di default: con la policy a costo di compressione gated
+    non serve, quindi con dwell=0 la maschera e' [True,True,True] (policy pura).
 
     Ordine azioni: [ESCALATE, MAINTAIN, DEESCALATE].
     """
@@ -784,11 +789,12 @@ def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
               f"λ_stab={meta.get('stability_penalty', 0.0)}, "
               f"dwell={min_state_dwell:.1f}s)")
         if MAPPO_COMPRESSION_GATE:
-            print(f"  guardrail compressione: ATTIVO  (ESCALATE solo se drop_rate>"
-                  f"{MAPPO_GATE_DROP_RATE:.0%} o occ>={MAPPO_EMERGENCY_OCCUPANCY:.0%};"
-                  f" EDS_MAPPO_GATE=0 per disattivare)")
+            print(f"  guardrail compressione: ATTIVO (opt-in)  (ESCALATE solo se "
+                  f"drop_rate>{MAPPO_GATE_DROP_RATE:.0%} o occ>="
+                  f"{MAPPO_EMERGENCY_OCCUPANCY:.0%}; per i checkpoint legacy)")
         else:
-            print("  guardrail compressione: DISATTIVO  (EDS_MAPPO_GATE=0)")
+            print("  guardrail compressione: DISATTIVO (default)  (policy pura; "
+                  "EDS_MAPPO_GATE=1 per riattivarlo sui checkpoint legacy)")
     elif enable_phase2:
         sm = CongestionStateMachine(
             ewma_alpha=PHASE2_EWMA_ALPHA,
