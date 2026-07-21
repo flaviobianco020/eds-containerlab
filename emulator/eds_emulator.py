@@ -325,15 +325,21 @@ class Topo:
     bottleneck_node: str   # nodo su cui leggere/agire la coda
     bottleneck_if: str
     queue_limit: int = 20
+    entry_node: Optional[str] = None  # se valorizzato, tutti i flussi entrano da qui
+                                      # (topologie a percorso unico: multi_hop, mesh)
 
 
 TOPOS = {
     "single_bottleneck": Topo("single_bottleneck", "single-bottleneck",
                               "dst", "10.0.30.1", "router", "eth4", 20),
+    # multi_hop e mesh sono topologie a percorso unico: un solo nodo d'ingresso
+    # (entry_node) da cui tutti i flussi partono, e la coda monitorata/compressa e'
+    # quella del primo hop. Gli scenari canonici (sorgenti src0/1/2) vengono
+    # rimappati su questo nodo in run_emulation.
     "multi_hop": Topo("multi_hop", "multi-hop",
-                      "n3", "10.0.3.2", "n0", "eth1", 20),
+                      "n3", "10.0.3.2", "n0", "eth1", 20, entry_node="n0"),
     "mesh": Topo("mesh", "mesh",
-                 "n12", "10.1.7.2", "n00", "eth1", 20),
+                 "n12", "10.1.7.2", "n00", "eth1", 20, entry_node="n00"),
 }
 
 
@@ -739,6 +745,11 @@ def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
     topo = TOPOS[topo_key]
     if queue_limit is not None:
         topo = replace(topo, queue_limit=queue_limit)
+    # Topologie a percorso unico (multi_hop, mesh): rimappa ogni sorgente sul nodo
+    # d'ingresso, cosi' gli stessi scenari canonici (src0/src1/src2) girano tali e
+    # quali facendo entrare tutti i flussi dal primo hop verso topo.dst_node.
+    if topo.entry_node is not None:
+        flows = [replace(f, src=topo.entry_node) for f in flows]
     net = Net(topo)
     print("=" * 70)
     if title:

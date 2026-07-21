@@ -27,6 +27,7 @@ Uso:
         --out logs/benchmark.csv
 
 Opzioni:
+    --topo TOPO               single_bottleneck (default) | multi_hop | mesh
     --scenarios 1,2,3,4,5,6   quali scenari (default: tutti)
     --modes phase1,phase2,mappo   quali controller (default: tutti e tre)
     --mappo-ckpt PATH         checkpoint JSON (obbligatorio se 'mappo' e' fra i modi)
@@ -74,11 +75,11 @@ KPIS = [
 ]
 
 
-def _redeploy() -> bool:
-    """Riesegue deploy.sh single_bottleneck per azzerare lo stato tc fra i run."""
+def _redeploy(topo: str = "single_bottleneck") -> bool:
+    """Riesegue deploy.sh <topo> per azzerare lo stato tc fra i run."""
     try:
-        r = subprocess.run(["./deploy.sh", "single_bottleneck"], cwd=_ROOT,
-                           capture_output=True, text=True, timeout=120)
+        r = subprocess.run(["./deploy.sh", topo], cwd=_ROOT,
+                           capture_output=True, text=True, timeout=180)
         return r.returncode == 0
     except (subprocess.TimeoutExpired, OSError):
         return False
@@ -125,9 +126,14 @@ def main() -> None:
     ap.add_argument("--label-b", default=None, help="etichetta per il modo 'mappob' (default: nome file)")
     ap.add_argument("--repeats", type=int, default=1)
     ap.add_argument("--scale", type=float, default=1.0)
+    ap.add_argument("--topo", default="single_bottleneck",
+                    choices=["single_bottleneck", "multi_hop", "mesh"],
+                    help="topologia ContainerLab (default single_bottleneck)")
     ap.add_argument("--no-redeploy", action="store_true")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
+
+    scen.TOPO = args.topo  # gli scenari leggono questo global per scegliere la topologia
 
     which_list = [s.strip() for s in args.scenarios.split(",") if s.strip()]
     modes = [m.strip() for m in args.modes.split(",") if m.strip()]
@@ -165,7 +171,7 @@ def main() -> None:
     n_runs = len(which_list) * len(modes) * args.repeats
     print("=" * 78)
     print("  BENCHMARK controller sull'emulatore ContainerLab")
-    print(f"  scenari={','.join(which_list)}  modi={','.join(modes)}  "
+    print(f"  topo={args.topo}  scenari={','.join(which_list)}  modi={','.join(modes)}  "
           f"ripetizioni={args.repeats}  scale={args.scale}")
     print(f"  run totali: {n_runs}  (log dettagliati in logs/bench_*.log)")
     print("=" * 78)
@@ -183,7 +189,7 @@ def main() -> None:
                 run_i += 1
                 tag = f"s{which}_{mode}_r{rep+1}"
                 if not args.no_redeploy:
-                    ok = _redeploy()
+                    ok = _redeploy(args.topo)
                     if not ok:
                         print(f"  [{run_i}/{n_runs}] {tag}: deploy FALLITO, salto")
                         continue
