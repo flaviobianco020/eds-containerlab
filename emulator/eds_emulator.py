@@ -351,7 +351,7 @@ class Net:
         self.topo = topo
         self.verbose = verbose
         self._drop_active = False
-        self._comp_rule = None   # spec esatta della regola iptables NFQUEUE
+        self._comp_rules = []    # spec esatte delle regole iptables NFQUEUE (FORWARD/OUTPUT)
 
     def container(self, node: str) -> str:
         return f"clab-{self.topo.lab}-{node}"
@@ -433,6 +433,7 @@ class Net:
                 "pid=$(cat /tmp/eds_comp.pid 2>/dev/null); "
                 "[ -n \"$pid\" ] && kill \"$pid\" 2>/dev/null; true")
         self.sh(node, "iptables -F FORWARD 2>/dev/null || true")
+        self.sh(node, "iptables -F OUTPUT 2>/dev/null || true")  # regole NFQUEUE residue su nodo-sorgente (multi_hop/mesh)
         self.apply_drop_low_priority(False)
 
     # --- Fase 2: compressore NFQUEUE lato router ----------------------------
@@ -481,12 +482,20 @@ class Net:
         # I pacchetti CONTROL (100 B payload = 128 B IP) passano direttamente:
         # riduce il carico sul processo Python userspace di ~90%.
         self.sh(node, f"rm -f {COMP_STATS_FILE}")  # azzera i contatori del run precedente
-        self._comp_rule = (f"FORWARD -o {iface} -p udp --dport {port} "
-                           f"-m length --length {NFQUEUE_MINLEN}:65535 "
-                           f"-j NFQUEUE --queue-num {NFQUEUE_NUM} --queue-bypass")
+        # Aggancia la regola a FORWARD *e* OUTPUT: sul single_bottleneck il nodo
+        # compressore INOLTRA il traffico (catena FORWARD), ma sulle topologie a
+        # percorso unico (multi_hop/mesh) il nodo d'ingresso ORIGINA il traffico
+        # (catena OUTPUT). Un pacchetto attraversa una sola delle due catene, quindi
+        # non c'e' doppia compressione; agganciarle entrambe rende il compressore
+        # indipendente dal ruolo del nodo.
+        rule_spec = (f"-o {iface} -p udp --dport {port} "
+                     f"-m length --length {NFQUEUE_MINLEN}:65535 "
+                     f"-j NFQUEUE --queue-num {NFQUEUE_NUM} --queue-bypass")
+        self._comp_rules = [f"FORWARD {rule_spec}", f"OUTPUT {rule_spec}"]
         # rimuove eventuali regole residue da run precedenti, poi aggiunge
-        self.sh(node, f"iptables -D {self._comp_rule} 2>/dev/null || true")
-        self.sh(node, f"iptables -A {self._comp_rule}")
+        for rule in self._comp_rules:
+            self.sh(node, f"iptables -D {rule} 2>/dev/null || true")
+            self.sh(node, f"iptables -A {rule}")
         # Avvia compressore in background, log in /tmp/eds_comp.log
         self.sh(node,
                 f"python3 {COMPRESSOR_PATH} {NFQUEUE_NUM} "
@@ -505,8 +514,9 @@ class Net:
             print("      [compressor] AVVISO: processo non attivo dopo lo start "
                   "-> rimuovo la regola NFQUEUE (fail-open).")
             print(f"      [compressor:log] {(log.stdout or '').strip()}")
-            self.sh(node, f"iptables -D {self._comp_rule} 2>/dev/null || true")
-            self._comp_rule = None
+            for rule in self._comp_rules:
+                self.sh(node, f"iptables -D {rule} 2>/dev/null || true")
+            self._comp_rules = []
         else:
             nfq = self.nfqueue_stats()
             bound = "si" if (nfq and nfq.get("peer_portid", 0) != 0) else "NO"
@@ -576,8 +586,8 @@ class Net:
     def stop_compressor(self):
         """Rimuove la regola iptables (match esatto) e termina il compressore."""
         node = self.topo.bottleneck_node
-        if self._comp_rule:
-            self.sh(node, f"iptables -D {self._comp_rule} 2>/dev/null || true")
+        for rule in self._comp_rules:
+            self.sh(node, f"iptables -D {rule} 2>/dev/null || true")
         self.sh(node,
                 "pid=$(cat /tmp/eds_comp.pid 2>/dev/null); "
                 "[ -n \"$pid\" ] && kill $pid 2>/dev/null || true")
