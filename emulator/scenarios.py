@@ -25,9 +25,10 @@ Modalita' di controllo (alternative):
     (nessuna)        FASE 1 - transizioni di stato istantanee sull'occupancy
     --phase2         FASE 2 - EWMA + isteresi (eFRAC) + compressore NFQUEUE
     --mappo CKPT     FASE 3 - la policy MAPPO addestrata pilota la macchina di
-                     stato; CKPT e' il checkpoint JSON prodotto nel simulatore
-                     (es. checkpoints/mappo_best_stab.json). Usa lo stesso
-                     compressore NFQUEUE della Fase 2: cambia solo il "cervello".
+                     stato; CKPT e' il checkpoint JSON prodotto nel simulatore.
+                     Policy raccomandata: checkpoints/mappo_ccgated2.json (reward
+                     gated, si autoregola -> guardrail non necessario). Usa lo
+                     stesso compressore NFQUEUE della Fase 2: cambia il "cervello".
 
 --scale moltiplica tutti i tempi (per demo piu' rapide; default 1.0).
 """
@@ -166,7 +167,7 @@ def main():
             mappo = sys.argv[sys.argv.index("--mappo") + 1]
         except IndexError:
             print("--mappo richiede il path del checkpoint JSON "
-                  "(es. --mappo checkpoints/mappo_best_stab.json)")
+                  "(es. --mappo checkpoints/mappo_ccgated2.json)")
             sys.exit(1)
         if not os.path.exists(mappo):
             print(f"checkpoint non trovato: {mappo}")

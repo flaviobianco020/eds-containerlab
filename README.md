@@ -134,8 +134,14 @@ traffico sono identici: cambia solo **chi decide lo stato di compressione**.
 python3 emulator/scenarios.py 1                 # Fase 1
 python3 emulator/scenarios.py 1 --phase2        # Fase 2 (compressore NFQUEUE)
 python3 emulator/scenarios.py 1 \
-    --mappo ../Event-Driven_Simulator/checkpoints/mappo_best_stab.json   # Fase 3
+    --mappo checkpoints/mappo_ccgated2.json     # Fase 3 (policy raccomandata)
 ```
+
+> **Policy Fase 3 raccomandata: `checkpoints/mappo_ccgated2.json`.** È addestrata
+> con la reward a *costo di compressione gated* (vedi sotto): si autoregola alla
+> sorgente e **non richiede il guardrail lato deploy** (che resta disattivo di
+> default). Comprime solo quando serve — su rete scarica (S2) o link giù (S4)
+> resta a 1.00×, senza troncare video a vuoto — e batte la baseline eFRAC.
 
 ### Deploy della policy appresa (Fase 3)
 
@@ -158,20 +164,31 @@ Fase 2.
   simulatore: normalmente è permesso solo `MAINTAIN`; con occupancy grezza
   almeno pari al 95% rimane consentito anche `ESCALATE`. Questo impedisce
   oscillazioni rapide senza bloccare la risposta alle emergenze.
-- **Guardrail anti-compressione-a-vuoto.** La policy è addestrata in un
-  simulatore dove la compressione è *non distruttiva* (riduce solo il tempo di
-  servizio in coda), quindi impara a comprimere volentieri; sull'emulatore la
-  compressione *tronca il payload* e aggiunge la latenza del middlebox NFQUEUE.
-  Comprimere quando non si stanno perdendo pacchetti butta throughput senza
-  migliorare il PDR (scenario 2 *flash crowd*). La `mappo_action_mask` blocca
-  quindi l'`ESCALATE` finché non c'è **pressione di perdita reale**
-  (`drop_rate` sopra soglia) o la coda è in emergenza (occupancy ≥ 95%).
-  L'occupancy da sola non basta come segnale: nello scenario 2 la coda sta al
-  60-75% anche a rete scarica (il flusso `control` è ~2500 pkt/s di pacchetti
-  piccoli che la tengono "in piedi" senza traboccare). Il gate agisce solo da
-  limite superiore — `MAINTAIN`/`DE-ESCALATE` sono sempre consentiti — ed è
-  disattivabile per un confronto A/B con la variabile d'ambiente
-  `EDS_MAPPO_GATE=0`.
+- **Guardrail anti-compressione-a-vuoto (OPT-IN, disattivo di default).** La
+  policy *legacy* (`mappo_best_stab_emulator_aligned_stress_rho7.json`) è
+  addestrata con una reward *senza* costo di compressione, in un simulatore dove
+  comprimere è *non distruttivo* (riduce solo il tempo di servizio in coda):
+  impara quindi a comprimere volentieri. Sull'emulatore la compressione *tronca
+  il payload* e aggiunge la latenza del middlebox NFQUEUE, quindi comprimere
+  quando non si stanno perdendo pacchetti butta throughput senza migliorare il
+  PDR (scenario 2 *flash crowd* → 1.31×, scenario 4 *link giù* → 1.28×, per zero
+  guadagno). Per tappare quel comportamento la `mappo_action_mask` poteva
+  bloccare l'`ESCALATE` finché non c'era **pressione di perdita reale**
+  (`drop_rate` sopra soglia) o emergenza coda (occupancy ≥ 95%). **Oggi la policy
+  raccomandata `mappo_ccgated2` sposta questa regolazione dentro la reward**
+  (costo di compressione *gated*, vedi sotto) e si autoregola da sola, perciò il
+  guardrail è **disattivo di default**: `EDS_MAPPO_GATE=1` lo riattiva solo per i
+  checkpoint legacy. Agisce comunque solo da limite superiore —
+  `MAINTAIN`/`DE-ESCALATE` sono sempre consentiti.
+- **Reward a costo di compressione *gated* (policy `mappo_ccgated2`).** Invece di
+  correggere in deploy, la penalità di compressione nel simulatore è moltiplicata
+  per `(1 − congestione)`, con `congestione = max(occ/0.2, loss/0.01)`: piena a
+  rete scarica (spinge verso `NORMAL`), nulla sotto congestione (comprime
+  liberamente). Così la policy *impara* a legare la compressione alla congestione
+  reale, non al link. Sull'emulatore: idle pulito (S2/S4 a 1.00×) **e**
+  compressione sotto carico (S5 pari alla legacy), PDR medio 85.9% con metà del
+  troncamento distruttivo (1.12× vs 1.28×). Vedi `simulator/marl/env.py` nel repo
+  del simulatore.
 - **Copertura della compressione e diagnostica.** In overload pesante (scenari 1
   e 5) il PDR resta al bound "senza compressione": la compressione non svuota la
   coda. Due leve/strumenti per indagarlo:
@@ -209,8 +226,9 @@ punto in cui l'osservazione di deploy differisce da quella di training.
 Per ottenere un checkpoint, nel repo del simulatore:
 
 ```bash
-python3 examples/train_mappo.py --episodes 4000 --stability-penalty 0.1
-# → produce checkpoints/mappo_best_stab.json
+# policy raccomandata (reward gated): stability + compression-cost
+python3 examples/train_mappo.py --episodes 4000 --stability-penalty 0.1 --compression-cost 0.5
+# → produce checkpoints/mappo_best_stab_cc.json  (qui rinominato mappo_ccgated2.json)
 ```
 
 ### Confronto automatico dei tre controller
@@ -222,12 +240,14 @@ ripetizioni, perché l'emulatore ha rumore reale).
 
 ```bash
 python3 emulator/benchmark.py \
-    --mappo-ckpt ../Event-Driven_Simulator/checkpoints/mappo_best_stab.json \
+    --mappo-ckpt checkpoints/mappo_ccgated2.json \
     --scale 0.5                 # tempi dimezzati per uno sweep più rapido
 
-# solo alcuni scenari, due ripetizioni, con CSV:
-python3 emulator/benchmark.py --scenarios 1,3,5 --repeats 2 \
-    --mappo-ckpt ../Event-Driven_Simulator/checkpoints/mappo_best_stab.json \
+# confronto diretto di due policy (es. legacy vs ccgated2) nella stessa tabella:
+python3 emulator/benchmark.py --scenarios 1,2,3,4,5,6,7 --repeats 2 \
+    --mappo-ckpt   checkpoints/mappo_best_stab_emulator_aligned_stress_rho7.json \
+    --mappo-ckpt-b checkpoints/mappo_ccgated2.json \
+    --label-a current --label-b ccgated2 \
     --out logs/benchmark.csv
 ```
 
