@@ -57,7 +57,12 @@ SCEN_NAMES = {
     "4": "link fail/recov.", "5": "persistent overload", "6": "mixed traffic",
     "7": "oscillante",
 }
-MODE_LABEL = {"phase1": "Fase 1", "phase2": "Fase 2", "mappo": "Fase 3"}
+# mappo = checkpoint A (--mappo-ckpt), mappob = checkpoint B (--mappo-ckpt-b):
+# permette il confronto diretto di due policy MAPPO nella stessa tabella (es.
+# current vs ccgated), alternate sugli stessi redeploy per ridurre il rumore.
+MODE_LABEL = {"phase1": "Fase 1", "phase2": "Fase 2",
+              "mappo": "MAPPO-A", "mappob": "MAPPO-B"}
+MAPPO_MODES = ("mappo", "mappob")
 KPIS = [
     ("packet_delivery_ratio", "PDR", "%"),
     ("throughput_mbps", "thr", "Mbit"),
@@ -79,11 +84,14 @@ def _redeploy() -> bool:
         return False
 
 
-def _run_once(which: str, mode: str, scale: float, ckpt, logpath: str):
-    """Esegue uno scenario in una modalita', catturando l'output nel log."""
+def _run_once(which: str, mode: str, scale: float, ckpts: dict, logpath: str):
+    """Esegue uno scenario in una modalita', catturando l'output nel log.
+
+    ckpts: mappa modo->path per i modi MAPPO ({"mappo": pathA, "mappob": pathB}).
+    """
     fn = scen.SCENARIOS[which]
     kwargs = {"phase2": mode == "phase2",
-              "mappo": ckpt if mode == "mappo" else None}
+              "mappo": ckpts.get(mode) if mode in MAPPO_MODES else None}
     try:
         with open(logpath, "w") as logf, contextlib.redirect_stdout(logf):
             return fn(scale, **kwargs)
@@ -111,7 +119,10 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Benchmark 3 controller sull'emulatore")
     ap.add_argument("--scenarios", default="1,2,3,4,5,6")
     ap.add_argument("--modes", default="phase1,phase2,mappo")
-    ap.add_argument("--mappo-ckpt", default=None)
+    ap.add_argument("--mappo-ckpt", default=None, help="checkpoint MAPPO A (modo 'mappo')")
+    ap.add_argument("--mappo-ckpt-b", default=None, help="checkpoint MAPPO B (modo 'mappob')")
+    ap.add_argument("--label-a", default=None, help="etichetta per il modo 'mappo' (default: nome file)")
+    ap.add_argument("--label-b", default=None, help="etichetta per il modo 'mappob' (default: nome file)")
     ap.add_argument("--repeats", type=int, default=1)
     ap.add_argument("--scale", type=float, default=1.0)
     ap.add_argument("--no-redeploy", action="store_true")
@@ -122,17 +133,31 @@ def main() -> None:
     modes = [m.strip() for m in args.modes.split(",") if m.strip()]
     for m in modes:
         if m not in MODE_LABEL:
-            print(f"modo sconosciuto: {m} (validi: phase1, phase2, mappo)")
+            print(f"modo sconosciuto: {m} (validi: phase1, phase2, mappo, mappob)")
             sys.exit(1)
-    ckpt = args.mappo_ckpt
-    if "mappo" in modes:
-        if not ckpt:
-            print("--mappo-ckpt e' obbligatorio quando 'mappo' e' fra i modi.")
-            sys.exit(1)
-        if not os.path.exists(ckpt):
-            print(f"checkpoint non trovato: {ckpt}")
-            sys.exit(1)
-        ckpt = os.path.abspath(ckpt)
+    # checkpoint per i due modi MAPPO (A = --mappo-ckpt, B = --mappo-ckpt-b)
+    ckpts: dict[str, str] = {}
+    for mode, arg, argname in (("mappo", args.mappo_ckpt, "--mappo-ckpt"),
+                               ("mappob", args.mappo_ckpt_b, "--mappo-ckpt-b")):
+        if mode in modes:
+            if not arg:
+                print(f"{argname} e' obbligatorio quando '{mode}' e' fra i modi.")
+                sys.exit(1)
+            if not os.path.exists(arg):
+                print(f"checkpoint non trovato: {arg}")
+                sys.exit(1)
+            ckpts[mode] = os.path.abspath(arg)
+
+    # etichette leggibili per la tabella (default: nome file senza mappo_/.json)
+    def _short(path):
+        base = os.path.basename(path)
+        for p in ("mappo_", ".json"):
+            base = base.replace(p, "")
+        return base[:12]
+    if "mappo" in ckpts:
+        MODE_LABEL["mappo"] = args.label_a or _short(ckpts["mappo"])
+    if "mappob" in ckpts:
+        MODE_LABEL["mappob"] = args.label_b or _short(ckpts["mappob"])
 
     logdir = os.path.join(_ROOT, "logs")
     os.makedirs(logdir, exist_ok=True)
@@ -165,7 +190,7 @@ def main() -> None:
                 print(f"  [{run_i}/{n_runs}] scenario {which} · {MODE_LABEL[mode]} "
                       f"· rep {rep+1} ...", end="", flush=True)
                 logpath = os.path.join(logdir, f"bench_{tag}.log")
-                summ = _run_once(which, mode, args.scale, ckpt, logpath)
+                summ = _run_once(which, mode, args.scale, ckpts, logpath)
                 if summ is None:
                     print(" ERRORE (vedi log)")
                     continue
