@@ -8,10 +8,15 @@ simulatore la capacita' del collo di bottiglia e' 10 e qui e' 10 Mbit/s) e
 stessi eventi temporizzati (degrado banda, link failure/recovery, flash crowd).
 
 Prerequisito:
-    ./deploy.sh single_bottleneck
+    ./deploy.sh <single_bottleneck|multi_hop|mesh>
 
 Uso:
-    python3 emulator/scenarios.py <1-6> [--scale 0.5] [--phase2 | --mappo CKPT]
+    python3 emulator/scenarios.py <1-7> [--topo TOPO] [--scale 0.5] [--phase2 | --mappo CKPT]
+
+    --topo single_bottleneck (default) | multi_hop | mesh
+           su multi_hop/mesh gli stessi scenari girano a percorso unico: tutti i
+           flussi entrano dal primo hop (n0 / n00) verso la destinazione, e la
+           coda monitorata/compressa e' quella del primo link.
 
     1  single_bottleneck      - overload di base (load 13 > cap 10)
     2  flash_crowd            - flusso surge bursty da t=20 a t=50
@@ -156,6 +161,17 @@ def main():
     phase2 = "--phase2" in sys.argv
     mappo = None
     trace = None
+    if "--topo" in sys.argv:
+        global TOPO
+        try:
+            TOPO = sys.argv[sys.argv.index("--topo") + 1]
+        except IndexError:
+            print("--topo richiede un nome (single_bottleneck|multi_hop|mesh)")
+            sys.exit(1)
+        if TOPO not in ("single_bottleneck", "multi_hop", "mesh"):
+            print(f"topologia sconosciuta: {TOPO} "
+                  "(valide: single_bottleneck, multi_hop, mesh)")
+            sys.exit(1)
     if "--scale" in sys.argv:
         try:
             scale = float(sys.argv[sys.argv.index("--scale") + 1])
