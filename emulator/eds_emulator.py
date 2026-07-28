@@ -573,15 +573,20 @@ class Net:
     def nfqueue_rule_matched(self) -> Optional[int]:
         """Pacchetti che hanno fatto match sulla regola NFQUEUE (contatore
         iptables). Confrontato con compressor_stats()['pkts'] misura il BYPASS:
-        matched - processati = pacchetti passati non compressi (--queue-bypass)."""
-        r = self.sh(self.topo.bottleneck_node,
-                    "iptables -nvxL FORWARD 2>/dev/null || true")
-        for line in (r.stdout or "").splitlines():
-            if f"NFQUEUE num {NFQUEUE_NUM}" in line:
-                f = line.split()
-                if len(f) >= 1 and f[0].isdigit():
-                    return int(f[0])   # colonna 'pkts' di iptables -v
-        return None
+        matched - processati = pacchetti passati non compressi (--queue-bypass).
+
+        Somma su FORWARD e OUTPUT: sul single_bottleneck il match e' su FORWARD
+        (nodo che inoltra), su multi_hop/mesh su OUTPUT (nodo che origina)."""
+        total = None
+        for chain in ("FORWARD", "OUTPUT"):
+            r = self.sh(self.topo.bottleneck_node,
+                        f"iptables -nvxL {chain} 2>/dev/null || true")
+            for line in (r.stdout or "").splitlines():
+                if f"NFQUEUE num {NFQUEUE_NUM}" in line:
+                    f = line.split()
+                    if len(f) >= 1 and f[0].isdigit():
+                        total = (total or 0) + int(f[0])   # colonna 'pkts'
+        return total
 
     def stop_compressor(self):
         """Rimuove la regola iptables (match esatto) e termina il compressore."""
