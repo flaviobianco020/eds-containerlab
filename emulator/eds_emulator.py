@@ -352,6 +352,9 @@ class Net:
         self.verbose = verbose
         self._drop_active = False
         self._comp_rules = []    # spec esatte delle regole iptables NFQUEUE (FORWARD/OUTPUT)
+        # parametri correnti della netem del collo (per il guasto via loss 100%)
+        self._netem_delay = "0ms"
+        self._netem_limit = topo.queue_limit
 
     def container(self, node: str) -> str:
         return f"clab-{self.topo.lab}-{node}"
@@ -400,18 +403,30 @@ class Net:
         """Allinea il drop-tail della coda (netem limit) al valore richiesto.
         delay=0 => collo byte-limited (drop-tail puro); vedi BOTTLENECK_DELAY."""
         node, iface = self.topo.bottleneck_node, self.topo.bottleneck_if
+        self._netem_delay = delay
+        self._netem_limit = limit_pkts
         self.sh(node, f"tc qdisc change dev {iface} parent 1:1 handle 10: "
                       f"netem delay {delay} limit {limit_pkts}")
         if self.verbose:
             print(f"      [tc] {iface}: coda drop-tail -> {limit_pkts} pacchetti")
 
     def link_down(self):
-        self.sh(self.topo.bottleneck_node, f"ip link set dev {self.topo.bottleneck_if} down")
+        # Guasto modellato con netem 'loss 100%' invece di 'ip link down': tutti i
+        # pacchetti sul collo vengono scartati, ma l'interfaccia resta su e le route
+        # (incluse quelle STATICHE dei nodi-sorgente su multi_hop/mesh) NON vengono
+        # rimosse dal kernel -> il recupero e' pulito su ogni topologia. Preserva
+        # delay e limit correnti della netem.
+        node, iface = self.topo.bottleneck_node, self.topo.bottleneck_if
+        self.sh(node, f"tc qdisc change dev {iface} parent 1:1 handle 10: "
+                      f"netem delay {self._netem_delay} limit {self._netem_limit} loss 100%")
         if self.verbose:
-            print("      [link] collo di bottiglia GIU'")
+            print("      [link] collo di bottiglia GIU' (netem loss 100%, route intatte)")
 
     def link_up(self):
-        self.sh(self.topo.bottleneck_node, f"ip link set dev {self.topo.bottleneck_if} up")
+        # Ripristino: netem senza loss (delay+limit correnti).
+        node, iface = self.topo.bottleneck_node, self.topo.bottleneck_if
+        self.sh(node, f"tc qdisc change dev {iface} parent 1:1 handle 10: "
+                      f"netem delay {self._netem_delay} limit {self._netem_limit}")
         if self.verbose:
             print("      [link] collo di bottiglia SU")
 
