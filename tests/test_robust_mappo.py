@@ -67,7 +67,18 @@ qdisc netem 10: parent 1:1 limit 40 delay 5ms
 
 
 class TestCompressionGuardrail(unittest.TestCase):
-    """Guardrail anti-compressione-a-vuoto: ESCALATE solo sotto pressione."""
+    """Guardrail anti-compressione-a-vuoto: ESCALATE solo sotto pressione.
+
+    Il guardrail e' ora OPT-IN (default OFF, la reward gated lo rende superfluo):
+    questi test ne verificano il comportamento QUANDO attivo, quindi lo abilitano
+    esplicitamente in setUp."""
+
+    def setUp(self):
+        self._gate = eds_emulator.MAPPO_COMPRESSION_GATE
+        eds_emulator.MAPPO_COMPRESSION_GATE = True
+
+    def tearDown(self):
+        eds_emulator.MAPPO_COMPRESSION_GATE = self._gate
 
     def test_blocks_escalation_without_loss(self):
         # Scenario 2: dwell soddisfatto, coda occupata ma senza drop -> niente
