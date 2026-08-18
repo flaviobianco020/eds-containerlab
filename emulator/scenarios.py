@@ -1,41 +1,41 @@
 #!/usr/bin/env python3
 """
-scenarios.py - I 6 scenari canonici della Fase 1 (PDF §4.5) per l'EMULATORE.
+scenarios.py - The 6 canonical Phase 1 scenarios (PDF §4.5) for the EMULATOR.
 
-Rispecchiano examples/scenarios.py del simulatore: stesse sorgenti, stessi
-FlowModel/classi, stessi rate (qui mappati 1:1 da pkt/s a Mbit/s, dato che nel
-simulatore la capacita' del collo di bottiglia e' 10 e qui e' 10 Mbit/s) e
-stessi eventi temporizzati (degrado banda, link failure/recovery, flash crowd).
+They mirror the simulator's examples/scenarios.py: same sources, same
+FlowModel/classes, same rates (here mapped 1:1 from pkt/s to Mbit/s, since in
+the simulator the bottleneck capacity is 10 and here it is 10 Mbit/s) and the
+same timed events (bandwidth degradation, link failure/recovery, flash crowd).
 
-Prerequisito:
+Prerequisite:
     ./deploy.sh <single_bottleneck|multi_hop|mesh>
 
-Uso:
+Usage:
     python3 emulator/scenarios.py <1-7> [--topo TOPO] [--scale 0.5] [--phase2 | --mappo CKPT]
 
     --topo single_bottleneck (default) | multi_hop | mesh
-           su multi_hop/mesh gli stessi scenari girano a percorso unico: tutti i
-           flussi entrano dal primo hop (n0 / n00) verso la destinazione, e la
-           coda monitorata/compressa e' quella del primo link.
+           on multi_hop/mesh the same scenarios run single-path: all the flows
+           enter at the first hop (n0 / n00) towards the destination, and the
+           monitored/compressed queue is the one of the first link.
 
-    1  single_bottleneck      - overload di base (load 13 > cap 10)
-    2  flash_crowd            - flusso surge bursty da t=20 a t=50
-    3  bandwidth_degradation  - banda 10->4 a t=30, 10 a t=60
-    4  link_failure_recovery  - link giu' a t=30, su a t=55
-    5  persistent_overload    - 3 flussi, overload sostenuto (load 15)
-    6  mixed_telemetry_video  - 3 classi con priorita' (control protetto)
-    7  oscillante             - impulsi collo 10->4 per 3s ogni 7s (carico 9)
+    1  single_bottleneck      - basic overload (load 13 > cap 10)
+    2  flash_crowd            - bursty surge flow from t=20 to t=50
+    3  bandwidth_degradation  - bandwidth 10->4 at t=30, 10 at t=60
+    4  link_failure_recovery  - link down at t=30, up at t=55
+    5  persistent_overload    - 3 flows, sustained overload (load 15)
+    6  mixed_telemetry_video  - 3 classes with priority (control protected)
+    7  oscillating            - bottleneck pulses 10->4 for 3s every 7s (load 9)
 
-Modalita' di controllo (alternative):
-    (nessuna)        FASE 1 - transizioni di stato istantanee sull'occupancy
-    --phase2         FASE 2 - EWMA + isteresi (eFRAC) + compressore NFQUEUE
-    --mappo CKPT     FASE 3 - la policy MAPPO addestrata pilota la macchina di
-                     stato; CKPT e' il checkpoint JSON prodotto nel simulatore.
-                     Policy raccomandata: checkpoints/mappo_ccgated2.json (reward
-                     gated, si autoregola -> guardrail non necessario). Usa lo
-                     stesso compressore NFQUEUE della Fase 2: cambia il "cervello".
+Control modes (alternatives):
+    (none)           PHASE 1 - instantaneous state transitions on occupancy
+    --phase2         PHASE 2 - EWMA + hysteresis (eFRAC) + NFQUEUE compressor
+    --mappo CKPT     PHASE 3 - the trained MAPPO policy drives the state
+                     machine; CKPT is the JSON checkpoint produced in the simulator.
+                     Recommended policy: checkpoints/mappo_ccgated2.json (gated
+                     reward, self-regulating -> guardrail not needed). Uses the
+                     same NFQUEUE compressor as Phase 2: only the "brain" changes.
 
---scale moltiplica tutti i tempi (per demo piu' rapide; default 1.0).
+--scale multiplies all the times (for faster demos; default 1.0).
 """
 import sys
 import os
@@ -83,7 +83,7 @@ def scenario_3(k, phase2=False, mappo=None, trace=None):
     events = [(30.0 * k, "rate", 4.0), (60.0 * k, "rate", 10.0)]
     return run_emulation(TOPO, flows, events, end, metric_interval=10.0 * k,
                          enable_phase2=phase2, mappo_ckpt=mappo, mappo_trace_path=trace,
-                         title="Scenario 3 - Bandwidth Degradation (10->4 a t=30, 10 a t=60)")
+                         title="Scenario 3 - Bandwidth Degradation (10->4 at t=30, 10 at t=60)")
 
 
 def scenario_4(k, phase2=False, mappo=None, trace=None):
@@ -95,7 +95,7 @@ def scenario_4(k, phase2=False, mappo=None, trace=None):
     events = [(30.0 * k, "down", None), (55.0 * k, "up", None)]
     return run_emulation(TOPO, flows, events, end, metric_interval=10.0 * k,
                          enable_phase2=phase2, mappo_ckpt=mappo, mappo_trace_path=trace,
-                         title="Scenario 4 - Link Failure & Recovery (giu' t=30, su t=55)")
+                         title="Scenario 4 - Link Failure & Recovery (down t=30, up t=55)")
 
 
 def scenario_5(k, phase2=False, mappo=None, trace=None):
@@ -117,18 +117,18 @@ def scenario_6(k, phase2=False, mappo=None, trace=None):
         FlowSpec(1, "src1", FlowModel.PERIODIC_TELEMETRY, 4.0, TELEMETRY, 0.0, end),
         FlowSpec(2, "src2", FlowModel.CONTROL,            2.0, CONTROL,   0.0, end),
     ]
-    # queue_size=30 come nello scenario 6 del simulatore
+    # queue_size=30 as in scenario 6 of the simulator
     return run_emulation(TOPO, flows, [], end, metric_interval=10.0 * k, queue_limit=30,
                          enable_phase2=phase2, mappo_ckpt=mappo, mappo_trace_path=trace,
-                         title="Scenario 6 - Mixed Telemetry & Video (control protetto)")
+                         title="Scenario 6 - Mixed Telemetry & Video (control protected)")
 
 
 def scenario_7(k, phase2=False, mappo=None, trace=None):
-    """Oscillante: impulsi di congestione brevi (collo 10->4 per 3s) ogni 7s, con
-    carico fisso 9 (VIDEO 7 + CONTROL 2). Il collo lampeggia sotto/sopra il carico,
-    costringendo la policy a salire e scendere in fretta: qui il dwell e la soglia
-    del guardrail diventano vincolanti (a differenza degli scenari canonici, che
-    non oscillano -> Esperimenti A/B piatti)."""
+    """Oscillating: short congestion pulses (bottleneck 10->4 for 3s) every 7s, with
+    a fixed load of 9 (VIDEO 7 + CONTROL 2). The bottleneck flickers below/above the
+    load, forcing the policy to go up and down quickly: here the dwell and the
+    guardrail threshold become binding (unlike the canonical scenarios, which do
+    not oscillate -> flat A/B experiments)."""
     end = 80.0 * k
     flows = [
         FlowSpec(0, "src0", FlowModel.POISSON, 7.0, VIDEO,   0.0, end),
@@ -137,12 +137,12 @@ def scenario_7(k, phase2=False, mappo=None, trace=None):
     events = []
     t = 10.0 * k
     while t < end - 4.0 * k:
-        events.append((t, "rate", 4.0))             # impulso: collo sotto il carico
-        events.append((t + 3.0 * k, "rate", 10.0))  # ripristino
+        events.append((t, "rate", 4.0))             # pulse: bottleneck below the load
+        events.append((t + 3.0 * k, "rate", 10.0))  # restore
         t += 7.0 * k
     return run_emulation(TOPO, flows, events, end, metric_interval=5.0 * k,
                          enable_phase2=phase2, mappo_ckpt=mappo, mappo_trace_path=trace,
-                         title="Scenario 7 - Oscillante (impulsi collo 10->4 x3s ogni 7s)")
+                         title="Scenario 7 - Oscillating (bottleneck pulses 10->4 x3s every 7s)")
 
 
 SCENARIOS = {
@@ -166,40 +166,40 @@ def main():
         try:
             TOPO = sys.argv[sys.argv.index("--topo") + 1]
         except IndexError:
-            print("--topo richiede un nome (single_bottleneck|multi_hop|mesh)")
+            print("--topo requires a name (single_bottleneck|multi_hop|mesh)")
             sys.exit(1)
         if TOPO not in ("single_bottleneck", "multi_hop", "mesh"):
-            print(f"topologia sconosciuta: {TOPO} "
-                  "(valide: single_bottleneck, multi_hop, mesh)")
+            print(f"unknown topology: {TOPO} "
+                  "(valid: single_bottleneck, multi_hop, mesh)")
             sys.exit(1)
     if "--scale" in sys.argv:
         try:
             scale = float(sys.argv[sys.argv.index("--scale") + 1])
         except (IndexError, ValueError):
-            print("--scale richiede un numero (es. --scale 0.5)")
+            print("--scale requires a number (e.g. --scale 0.5)")
             sys.exit(1)
     if "--mappo" in sys.argv:
         try:
             mappo = sys.argv[sys.argv.index("--mappo") + 1]
         except IndexError:
-            print("--mappo richiede il path del checkpoint JSON "
-                  "(es. --mappo checkpoints/mappo_ccgated2.json)")
+            print("--mappo requires the path of the JSON checkpoint "
+                  "(e.g. --mappo checkpoints/mappo_ccgated2.json)")
             sys.exit(1)
         if not os.path.exists(mappo):
-            print(f"checkpoint non trovato: {mappo}")
+            print(f"checkpoint not found: {mappo}")
             sys.exit(1)
         if phase2:
-            print("--mappo e --phase2 sono alternativi: la Fase 3 usa gia' "
-                  "il compressore. Ignoro --phase2.")
+            print("--mappo and --phase2 are alternatives: Phase 3 already uses "
+                  "the compressor. Ignoring --phase2.")
             phase2 = False
     if "--mappo-trace" in sys.argv:
         try:
             trace = sys.argv[sys.argv.index("--mappo-trace") + 1]
         except IndexError:
-            print("--mappo-trace richiede un file JSON di output")
+            print("--mappo-trace requires an output JSON file")
             sys.exit(1)
         if mappo is None:
-            print("--mappo-trace richiede anche --mappo CKPT")
+            print("--mappo-trace also requires --mappo CKPT")
             sys.exit(1)
     SCENARIOS[which](scale, phase2=phase2, mappo=mappo, trace=trace)
 

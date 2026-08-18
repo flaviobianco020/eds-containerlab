@@ -1,38 +1,38 @@
 #!/usr/bin/env bash
 #
-# deploy.sh - Deploy e configurazione delle topologie ContainerLab
-#             per il progetto Event-Driven Simulator (EDS).
+# deploy.sh - Deploy and configuration of the ContainerLab topologies
+#             for the Event-Driven Simulator (EDS) project.
 #
-# Esegue il deploy con ContainerLab e poi configura, su ogni container:
-#   - indirizzi IP sulle interfacce
-#   - IP forwarding sui nodi che instradano
-#   - route SPECIFICHE PER SUBNET (il default gateway NON viene toccato)
-#   - shaping del traffico con tc:
-#       * link da 10 Mbps  -> tbf con "burst 1mbit" (fix del burst) + netem,
-#         con coda finita "limit 20" (drop-tail) che riproduce
-#         QueueManager(max_size=20) del simulatore
-#       * link di accesso  -> solo netem (nessun tbf, alta capacità)
+# Deploys with ContainerLab and then configures, on each container:
+#   - IP addresses on the interfaces
+#   - IP forwarding on the routing nodes
+#   - SUBNET-SPECIFIC routes (the default gateway is NOT touched)
+#   - traffic shaping with tc:
+#       * 10 Mbps links  -> tbf with "burst 1mbit" (burst fix) + netem,
+#         with a finite queue "limit 20" (drop-tail) that reproduces
+#         the simulator's QueueManager(max_size=20)
+#       * access links   -> netem only (no tbf, high capacity)
 #
-# Uso:
-#   ./deploy.sh <topologia>            # deploy + configurazione
-#   ./deploy.sh <topologia> destroy    # smontaggio del lab
+# Usage:
+#   ./deploy.sh <topology>            # deploy + configuration
+#   ./deploy.sh <topology> destroy    # tear down the lab
 #
-#   topologia: single_bottleneck | multi_hop | mesh
+#   topology: single_bottleneck | multi_hop | mesh
 #
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOPO_DIR="${SCRIPT_DIR}/topologies"
 
-# Dimensione della coda (drop-tail) sui link da 10 Mbps, in pacchetti.
-# Corrisponde a QueueManager(max_size=...) nel simulatore (default 20).
+# Queue size (drop-tail) on the 10 Mbps links, in packets.
+# Corresponds to QueueManager(max_size=...) in the simulator (default 20).
 QUEUE_LIMIT="${QUEUE_LIMIT:-20}"
 
 TOPOLOGY="${1:-}"
 ACTION="${2:-deploy}"
 
 usage() {
-  echo "Uso: $0 <single_bottleneck|multi_hop|mesh> [deploy|destroy]" >&2
+  echo "Usage: $0 <single_bottleneck|multi_hop|mesh> [deploy|destroy]" >&2
   exit 1
 }
 
@@ -47,7 +47,7 @@ esac
 
 # ── helper ───────────────────────────────────────────────────────────────────
 
-# cexec <node> "<comando shell>"
+# cexec <node> "<shell command>"
 cexec() {
   local node="$1"; shift
   docker exec "clab-${LAB}-${node}" sh -c "$*"
@@ -63,24 +63,24 @@ enable_forward() {
   cexec "$1" "sysctl -w net.ipv4.ip_forward=1 >/dev/null"
 }
 
-# add_route <node> <subnet> <gateway>   (route specifica, NON tocca il default gw)
+# add_route <node> <subnet> <gateway>   (specific route, does NOT touch the default gw)
 add_route() {
   cexec "$1" "ip route replace $2 via $3"
 }
 
 # shape_bottleneck <node> <iface> [rate] [delay]
-# Link da 10 Mbps: tbf root (rate + fix del burst "burst 1mbit") e netem come
-# qdisc figlia per la coda finita "limit $QUEUE_LIMIT" (drop-tail), che riproduce
-# i drop di QueueManager.enqueue() quando la coda è piena.
+# 10 Mbps link: tbf root (rate + burst fix "burst 1mbit") and netem as the child
+# qdisc for the finite queue "limit $QUEUE_LIMIT" (drop-tail), which reproduces
+# the drops of QueueManager.enqueue() when the queue is full.
 #
-# IMPORTANTE — delay=0 di default (collo BYTE-limited). Con un ritardo sul netem,
-# per la legge di Little i pacchetti "in volo" sono rate*delay: con `limit 20` il
-# ritardo si mangia il buffer e il collo satura a limit/delay pkt/s
-# INDIPENDENTEMENTE dai byte, così la compressione non svuota mai la coda (il
-# servizio diventa ∝ pacchetti invece che ∝ byte come nel simulatore). Con
-# delay=0 il buffer è un drop-tail puro e il vincolo torna la banda (tbf): la
-# compressione riduce i byte -> più pacchetti passano -> il PDR risponde, in
-# parità col simulatore. La latenza del link è modellata sui link di accesso.
+# IMPORTANT — delay=0 by default (BYTE-limited bottleneck). With a delay on the
+# netem, by Little's law the "in flight" packets are rate*delay: with `limit 20`
+# the delay eats the buffer and the bottleneck saturates at limit/delay pkt/s
+# INDEPENDENTLY of the bytes, so compression never empties the queue (the service
+# becomes ∝ packets instead of ∝ bytes as in the simulator). With delay=0 the
+# buffer is a pure drop-tail and the constraint goes back to the bandwidth (tbf):
+# compression reduces the bytes -> more packets pass -> the PDR responds, on par
+# with the simulator. The link latency is modeled on the access links.
 shape_bottleneck() {
   local node="$1" iface="$2" rate="${3:-10mbit}" delay="${4:-0ms}"
   cexec "$node" "tc qdisc replace dev $iface root handle 1: tbf rate $rate burst 1mbit limit 1m"
@@ -88,19 +88,18 @@ shape_bottleneck() {
 }
 
 # shape_access <node> <iface> [delay]
-# Link di accesso ad alta capacità: solo netem, nessun tbf. Qui vive la LATENZA
-# del percorso (default 5ms), spostata qui dal collo di bottiglia così il
-# drop-tail del collo resta puro (vedi shape_bottleneck). Alta capacità + limit
-# netem ampio => nessun drop introdotto.
+# High-capacity access link: only netem, no tbf. Here lives the path LATENCY
+# (default 5ms), moved here from the bottleneck so the bottleneck drop-tail stays
+# pure (see shape_bottleneck). High capacity + wide netem limit => no drop introduced.
 shape_access() {
   local node="$1" iface="$2" delay="${3:-5ms}"
   cexec "$node" "tc qdisc replace dev $iface root netem delay $delay"
 }
 
-# ── configurazioni per topologia ─────────────────────────────────────────────
+# ── per-topology configurations ──────────────────────────────────────────────
 
 config_single_bottleneck() {
-  # indirizzi
+  # addresses
   set_ip src0   eth1 10.0.10.1/24
   set_ip router eth1 10.0.10.254/24
   set_ip src1   eth1 10.0.20.1/24
@@ -112,7 +111,7 @@ config_single_bottleneck() {
 
   enable_forward router
 
-  # route specifiche per subnet: ogni sorgente verso dst, dst verso le sorgenti
+  # subnet-specific routes: each source towards dst, dst towards the sources
   add_route src0 10.0.30.0/24 10.0.10.254
   add_route src1 10.0.30.0/24 10.0.20.254
   add_route src2 10.0.30.0/24 10.0.40.254
@@ -120,7 +119,7 @@ config_single_bottleneck() {
   add_route dst  10.0.20.0/24 10.0.30.254
   add_route dst  10.0.40.0/24 10.0.30.254
 
-  # link di accesso ad alta capacità -> solo netem
+  # high-capacity access links -> netem only
   shape_access src0   eth1
   shape_access src1   eth1
   shape_access src2   eth1
@@ -128,13 +127,13 @@ config_single_bottleneck() {
   shape_access router eth2
   shape_access router eth3
 
-  # collo di bottiglia 10 Mbps (entrambe le direzioni) -> tbf + netem (drop-tail)
+  # 10 Mbps bottleneck (both directions) -> tbf + netem (drop-tail)
   shape_bottleneck router eth4
   shape_bottleneck dst    eth1
 }
 
 config_multi_hop() {
-  # indirizzi
+  # addresses
   set_ip n0 eth1 10.0.1.1/24
   set_ip n1 eth1 10.0.1.2/24
   set_ip n1 eth2 10.0.2.1/24
@@ -145,7 +144,7 @@ config_multi_hop() {
   enable_forward n1
   enable_forward n2
 
-  # route specifiche per subnet (catena n0 -> n3 e ritorno)
+  # subnet-specific routes (chain n0 -> n3 and back)
   add_route n0 10.0.2.0/24 10.0.1.2
   add_route n0 10.0.3.0/24 10.0.1.2
   add_route n1 10.0.3.0/24 10.0.2.2
@@ -153,7 +152,7 @@ config_multi_hop() {
   add_route n3 10.0.2.0/24 10.0.3.1
   add_route n3 10.0.1.0/24 10.0.3.1
 
-  # tutti i link sono colli di bottiglia da 10 Mbps (queue_size=20)
+  # all links are 10 Mbps bottlenecks (queue_size=20)
   shape_bottleneck n0 eth1
   shape_bottleneck n1 eth1
   shape_bottleneck n1 eth2
@@ -163,17 +162,17 @@ config_multi_hop() {
 }
 
 config_mesh() {
-  # indirizzi - link orizzontali riga 0
+  # addresses - horizontal links row 0
   set_ip n00 eth1 10.1.1.1/24
   set_ip n01 eth1 10.1.1.2/24
   set_ip n01 eth2 10.1.2.1/24
   set_ip n02 eth1 10.1.2.2/24
-  # indirizzi - link orizzontali riga 1
+  # addresses - horizontal links row 1
   set_ip n10 eth1 10.1.3.1/24
   set_ip n11 eth1 10.1.3.2/24
   set_ip n11 eth2 10.1.4.1/24
   set_ip n12 eth1 10.1.4.2/24
-  # indirizzi - link verticali
+  # addresses - vertical links
   set_ip n00 eth2 10.1.5.1/24
   set_ip n10 eth2 10.1.5.2/24
   set_ip n01 eth3 10.1.6.1/24
@@ -181,18 +180,18 @@ config_mesh() {
   set_ip n02 eth2 10.1.7.1/24
   set_ip n12 eth2 10.1.7.2/24
 
-  # forwarding su tutti i nodi della mesh
+  # forwarding on all mesh nodes
   for n in n00 n01 n02 n10 n11 n12; do enable_forward "$n"; done
 
-  # percorso dimostrativo angolo-angolo: n00 (10.1.1.1) <-> n12 (10.1.7.2)
-  # andata:  n00 -> n01 -> n02 -> n12
+  # demonstrative corner-to-corner path: n00 (10.1.1.1) <-> n12 (10.1.7.2)
+  # forward:  n00 -> n01 -> n02 -> n12
   add_route n00 10.1.7.0/24 10.1.1.2
   add_route n01 10.1.7.0/24 10.1.2.2
-  # ritorno: n12 -> n02 -> n01 -> n00
+  # return: n12 -> n02 -> n01 -> n00
   add_route n12 10.1.1.0/24 10.1.7.1
   add_route n02 10.1.1.0/24 10.1.2.1
 
-  # ogni link della mesh e' da 10 Mbps (queue_size=20) -> tbf + netem (drop-tail)
+  # every mesh link is 10 Mbps (queue_size=20) -> tbf + netem (drop-tail)
   shape_bottleneck n00 eth1; shape_bottleneck n01 eth1
   shape_bottleneck n01 eth2; shape_bottleneck n02 eth1
   shape_bottleneck n10 eth1; shape_bottleneck n11 eth1
@@ -205,19 +204,19 @@ config_mesh() {
 # ── main ─────────────────────────────────────────────────────────────────────
 
 if [ "$ACTION" = "destroy" ]; then
-  echo ">> Smontaggio del lab '$LAB'..."
+  echo ">> Tearing down the lab '$LAB'..."
   containerlab destroy -t "$CLAB_FILE" --cleanup
   exit 0
 fi
 
-echo ">> Deploy del lab '$LAB' da $CLAB_FILE ..."
+echo ">> Deploying the lab '$LAB' from $CLAB_FILE ..."
 containerlab deploy -t "$CLAB_FILE" --reconfigure
 
-echo ">> Configurazione di indirizzi, routing e tc (coda drop-tail = $QUEUE_LIMIT pacchetti) ..."
+echo ">> Configuring addresses, routing and tc (drop-tail queue = $QUEUE_LIMIT packets) ..."
 "config_${TOPOLOGY}"
 
-echo ">> Fatto. Topologia '$TOPOLOGY' pronta."
-echo "   Test rapido:      ./run_simulation.sh $TOPOLOGY"
+echo ">> Done. Topology '$TOPOLOGY' ready."
+echo "   Quick test:       ./run_simulation.sh $TOPOLOGY"
 if [ "$TOPOLOGY" = "single_bottleneck" ]; then
-  echo "   Scenari EDS 1-6:  ./scenarios.sh <1-6>"
+  echo "   EDS scenarios 1-6:  ./scenarios.sh <1-6>"
 fi

@@ -1,21 +1,21 @@
 # mesh.clab.yml
 #
-# Topologia "mesh" del progetto Event-Driven Simulator.
-# Riproduce NetworkTopology.mesh() (rows=2, cols=3): griglia 2x3 con link
-# bidirezionali, ognuno da 10 Mbps (sim: capacity=10).
+# "mesh" topology of the Event-Driven Simulator project.
+# Reproduces NetworkTopology.mesh() (rows=2, cols=3): a 2x3 grid with
+# bidirectional links, each 10 Mbps (sim: capacity=10).
 #
 #   n00 ── n01 ── n02
 #    │      │      │
 #   n10 ── n11 ── n12
 #
-# Indirizzi, routing e shaping sono applicati da ../deploy.sh.
+# Addresses, routing and shaping are applied by ../deploy.sh.
 name: mesh
 
 topology:
   defaults:
     kind: linux
     binds:
-      # agente dell'emulatore (traffic generator UDP) disponibile in /opt/eds
+      # emulator agent (UDP traffic generator) available at /opt/eds
       - ../agent:/opt/eds:ro
   kinds:
     linux:
@@ -28,13 +28,13 @@ topology:
     n11: {}
     n12: {}
   links:
-    # link orizzontali - riga 0
+    # horizontal links - row 0
     - endpoints: ["n00:eth1", "n01:eth1"]
     - endpoints: ["n01:eth2", "n02:eth1"]
-    # link orizzontali - riga 1
+    # horizontal links - row 1
     - endpoints: ["n10:eth1", "n11:eth1"]
     - endpoints: ["n11:eth2", "n12:eth1"]
-    # link verticali
+    # vertical links
     - endpoints: ["n00:eth2", "n10:eth2"]
     - endpoints: ["n01:eth3", "n11:eth3"]
     - endpoints: ["n02:eth2", "n12:eth2"]

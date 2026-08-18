@@ -1,40 +1,40 @@
 #!/usr/bin/env python3
 """
-benchmark.py — Confronto automatico dei tre controller SULL'EMULATORE reale.
+benchmark.py — Automatic comparison of the three controllers ON the real EMULATOR.
 
-Esegue, sullo stesso ferro ContainerLab, ognuno degli scenari canonici sotto:
+Runs, on the same ContainerLab hardware, each of the canonical scenarios under:
 
-    Fase 1  — transizioni istantanee sull'occupancy
-    Fase 2  — EWMA + isteresi (eFRAC) + compressore NFQUEUE
-    Fase 3  — policy MAPPO addestrata (checkpoint JSON del simulatore)
+    Phase 1  — instantaneous transitions on occupancy
+    Phase 2  — EWMA + hysteresis (eFRAC) + NFQUEUE compressor
+    Phase 3  — trained MAPPO policy (simulator JSON checkpoint)
 
-e produce una tabella comparativa dei KPI misurati (PDR, throughput, latenza,
-occupancy, drop, transizioni, compression ratio). Media su piu' ripetizioni,
-perche' l'emulatore ha rumore reale.
+and produces a comparative table of the measured KPIs (PDR, throughput, latency,
+occupancy, drop, transitions, compression ratio). Averaged over several
+repetitions, because the emulator has real noise.
 
-Prerequisito:  il lab deve essere gia' deployato almeno una volta
+Prerequisite:  the lab must already be deployed at least once
     ./deploy.sh single_bottleneck
 
-Uso:
-    # tutti gli scenari, i tre controller, 1 ripetizione, tempi dimezzati:
+Usage:
+    # all scenarios, the three controllers, 1 repetition, halved times:
     python3 emulator/benchmark.py \
         --mappo-ckpt ../Event-Driven_Simulator/checkpoints/mappo_best_stab.json \
         --scale 0.5
 
-    # solo scenari 1,3,5, due ripetizioni, salva CSV:
+    # only scenarios 1,3,5, two repetitions, save CSV:
     python3 emulator/benchmark.py --scenarios 1,3,5 --repeats 2 \
         --mappo-ckpt ../Event-Driven_Simulator/checkpoints/mappo_best_stab.json \
         --out logs/benchmark.csv
 
-Opzioni:
+Options:
     --topo TOPO               single_bottleneck (default) | multi_hop | mesh
-    --scenarios 1,2,3,4,5,6   quali scenari (default: tutti)
-    --modes phase1,phase2,mappo   quali controller (default: tutti e tre)
-    --mappo-ckpt PATH         checkpoint JSON (obbligatorio se 'mappo' e' fra i modi)
-    --repeats N               ripetizioni per (scenario, modo), media (default 1)
-    --scale K                 scala i tempi degli scenari (default 1.0)
-    --no-redeploy             NON rieseguire deploy.sh prima di ogni run
-    --out FILE                salva le righe grezze in CSV
+    --scenarios 1,2,3,4,5,6   which scenarios (default: all)
+    --modes phase1,phase2,mappo   which controllers (default: all three)
+    --mappo-ckpt PATH         JSON checkpoint (required if 'mappo' is among the modes)
+    --repeats N               repetitions per (scenario, mode), averaged (default 1)
+    --scale K                 scales the scenario times (default 1.0)
+    --no-redeploy             do NOT re-run deploy.sh before each run
+    --out FILE                save the raw rows to CSV
 """
 from __future__ import annotations
 
@@ -56,12 +56,12 @@ import scenarios as scen  # noqa: E402
 SCEN_NAMES = {
     "1": "single bottleneck", "2": "flash crowd", "3": "bandwidth degr.",
     "4": "link fail/recov.", "5": "persistent overload", "6": "mixed traffic",
-    "7": "oscillante",
+    "7": "oscillating",
 }
 # mappo = checkpoint A (--mappo-ckpt), mappob = checkpoint B (--mappo-ckpt-b):
-# permette il confronto diretto di due policy MAPPO nella stessa tabella (es.
-# current vs ccgated), alternate sugli stessi redeploy per ridurre il rumore.
-MODE_LABEL = {"phase1": "Fase 1", "phase2": "Fase 2",
+# allows the direct comparison of two MAPPO policies in the same table (e.g.
+# current vs ccgated), interleaved on the same redeploys to reduce the noise.
+MODE_LABEL = {"phase1": "Phase 1", "phase2": "Phase 2",
               "mappo": "MAPPO-A", "mappob": "MAPPO-B"}
 MAPPO_MODES = ("mappo", "mappob")
 KPIS = [
@@ -76,7 +76,7 @@ KPIS = [
 
 
 def _redeploy(topo: str = "single_bottleneck") -> bool:
-    """Riesegue deploy.sh <topo> per azzerare lo stato tc fra i run."""
+    """Re-runs deploy.sh <topo> to reset the tc state between runs."""
     try:
         r = subprocess.run(["./deploy.sh", topo], cwd=_ROOT,
                            capture_output=True, text=True, timeout=180)
@@ -86,9 +86,9 @@ def _redeploy(topo: str = "single_bottleneck") -> bool:
 
 
 def _run_once(which: str, mode: str, scale: float, ckpts: dict, logpath: str):
-    """Esegue uno scenario in una modalita', catturando l'output nel log.
+    """Runs one scenario in one mode, capturing the output in the log.
 
-    ckpts: mappa modo->path per i modi MAPPO ({"mappo": pathA, "mappob": pathB}).
+    ckpts: mode->path map for the MAPPO modes ({"mappo": pathA, "mappob": pathB}).
     """
     fn = scen.SCENARIOS[which]
     kwargs = {"phase2": mode == "phase2",
@@ -96,9 +96,9 @@ def _run_once(which: str, mode: str, scale: float, ckpts: dict, logpath: str):
     try:
         with open(logpath, "w") as logf, contextlib.redirect_stdout(logf):
             return fn(scale, **kwargs)
-    except Exception as exc:  # noqa: BLE001 — un fallimento non deve fermare lo sweep
+    except Exception as exc:  # noqa: BLE001 — a failure must not stop the sweep
         with open(logpath, "a") as logf:
-            logf.write(f"\n[benchmark] ERRORE: {exc}\n")
+            logf.write(f"\n[benchmark] ERROR: {exc}\n")
         return None
 
 
@@ -117,44 +117,44 @@ def _fmt(key: str, unit: str, v):
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Benchmark 3 controller sull'emulatore")
+    ap = argparse.ArgumentParser(description="Benchmark 3 controllers on the emulator")
     ap.add_argument("--scenarios", default="1,2,3,4,5,6")
     ap.add_argument("--modes", default="phase1,phase2,mappo")
-    ap.add_argument("--mappo-ckpt", default=None, help="checkpoint MAPPO A (modo 'mappo')")
-    ap.add_argument("--mappo-ckpt-b", default=None, help="checkpoint MAPPO B (modo 'mappob')")
-    ap.add_argument("--label-a", default=None, help="etichetta per il modo 'mappo' (default: nome file)")
-    ap.add_argument("--label-b", default=None, help="etichetta per il modo 'mappob' (default: nome file)")
+    ap.add_argument("--mappo-ckpt", default=None, help="MAPPO checkpoint A (mode 'mappo')")
+    ap.add_argument("--mappo-ckpt-b", default=None, help="MAPPO checkpoint B (mode 'mappob')")
+    ap.add_argument("--label-a", default=None, help="label for mode 'mappo' (default: file name)")
+    ap.add_argument("--label-b", default=None, help="label for mode 'mappob' (default: file name)")
     ap.add_argument("--repeats", type=int, default=1)
     ap.add_argument("--scale", type=float, default=1.0)
     ap.add_argument("--topo", default="single_bottleneck",
                     choices=["single_bottleneck", "multi_hop", "mesh"],
-                    help="topologia ContainerLab (default single_bottleneck)")
+                    help="ContainerLab topology (default single_bottleneck)")
     ap.add_argument("--no-redeploy", action="store_true")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
-    scen.TOPO = args.topo  # gli scenari leggono questo global per scegliere la topologia
+    scen.TOPO = args.topo  # the scenarios read this global to pick the topology
 
     which_list = [s.strip() for s in args.scenarios.split(",") if s.strip()]
     modes = [m.strip() for m in args.modes.split(",") if m.strip()]
     for m in modes:
         if m not in MODE_LABEL:
-            print(f"modo sconosciuto: {m} (validi: phase1, phase2, mappo, mappob)")
+            print(f"unknown mode: {m} (valid: phase1, phase2, mappo, mappob)")
             sys.exit(1)
-    # checkpoint per i due modi MAPPO (A = --mappo-ckpt, B = --mappo-ckpt-b)
+    # checkpoints for the two MAPPO modes (A = --mappo-ckpt, B = --mappo-ckpt-b)
     ckpts: dict[str, str] = {}
     for mode, arg, argname in (("mappo", args.mappo_ckpt, "--mappo-ckpt"),
                                ("mappob", args.mappo_ckpt_b, "--mappo-ckpt-b")):
         if mode in modes:
             if not arg:
-                print(f"{argname} e' obbligatorio quando '{mode}' e' fra i modi.")
+                print(f"{argname} is required when '{mode}' is among the modes.")
                 sys.exit(1)
             if not os.path.exists(arg):
-                print(f"checkpoint non trovato: {arg}")
+                print(f"checkpoint not found: {arg}")
                 sys.exit(1)
             ckpts[mode] = os.path.abspath(arg)
 
-    # etichette leggibili per la tabella (default: nome file senza mappo_/.json)
+    # readable labels for the table (default: file name without mappo_/.json)
     def _short(path):
         base = os.path.basename(path)
         for p in ("mappo_", ".json"):
@@ -170,13 +170,13 @@ def main() -> None:
 
     n_runs = len(which_list) * len(modes) * args.repeats
     print("=" * 78)
-    print("  BENCHMARK controller sull'emulatore ContainerLab")
-    print(f"  topo={args.topo}  scenari={','.join(which_list)}  modi={','.join(modes)}  "
-          f"ripetizioni={args.repeats}  scale={args.scale}")
-    print(f"  run totali: {n_runs}  (log dettagliati in logs/bench_*.log)")
+    print("  BENCHMARK controllers on the ContainerLab emulator")
+    print(f"  topo={args.topo}  scenarios={','.join(which_list)}  modes={','.join(modes)}  "
+          f"repeats={args.repeats}  scale={args.scale}")
+    print(f"  total runs: {n_runs}  (detailed logs in logs/bench_*.log)")
     print("=" * 78)
 
-    # raw[(scenario, mode)] = lista di dict-summary (una per ripetizione)
+    # raw[(scenario, mode)] = list of summary dicts (one per repetition)
     raw: dict[tuple, list] = {}
     csv_rows = []
     run_i = 0
@@ -191,14 +191,14 @@ def main() -> None:
                 if not args.no_redeploy:
                     ok = _redeploy(args.topo)
                     if not ok:
-                        print(f"  [{run_i}/{n_runs}] {tag}: deploy FALLITO, salto")
+                        print(f"  [{run_i}/{n_runs}] {tag}: deploy FAILED, skipping")
                         continue
                 print(f"  [{run_i}/{n_runs}] scenario {which} · {MODE_LABEL[mode]} "
                       f"· rep {rep+1} ...", end="", flush=True)
                 logpath = os.path.join(logdir, f"bench_{tag}.log")
                 summ = _run_once(which, mode, args.scale, ckpts, logpath)
                 if summ is None:
-                    print(" ERRORE (vedi log)")
+                    print(" ERROR (see log)")
                     continue
                 samples.append(summ)
                 row = {"scenario": which, "mode": mode, "rep": rep + 1}
@@ -210,7 +210,7 @@ def main() -> None:
             if samples:
                 raw[(which, mode)] = samples
 
-    # ---- media e deviazione standard per (scenario, modo) ----------------
+    # ---- mean and standard deviation per (scenario, mode) ----------------
     def _vals(which, mode, key):
         s = raw.get((which, mode))
         return [d[key] for d in s if d.get(key) is not None] if s else []
@@ -224,7 +224,7 @@ def main() -> None:
         return statistics.pstdev(vals) if len(vals) > 1 else 0.0
 
     print("\n" + "=" * 78)
-    print(f"  RISULTATI  (media su {args.repeats} ripetizione/i)")
+    print(f"  RESULTS  (mean over {args.repeats} repetition(s))")
     print("=" * 78)
     for which in which_list:
         print(f"\n  Scenario {which} — {SCEN_NAMES.get(which, '?')}")
@@ -236,9 +236,9 @@ def main() -> None:
             cells = "".join(f"{_fmt(k, u, avg(which, mode, k)):>10}" for k, _, u in KPIS)
             print(f"    {MODE_LABEL[mode]:<10}{cells}")
 
-    # ---- media globale (su tutti gli scenari) ----------------------------
+    # ---- global mean (over all scenarios) --------------------------------
     print("\n" + "=" * 78)
-    print("  MEDIA GLOBALE (tutti gli scenari)")
+    print("  GLOBAL MEAN (all scenarios)")
     header = f"    {'controller':<10}" + "".join(f"{lab:>10}" for _, lab, _ in KPIS)
     print(header)
     for mode in modes:
@@ -250,9 +250,9 @@ def main() -> None:
         print(f"    {MODE_LABEL[mode]:<10}" + "".join(f"{c:>10}" for c in cells))
     print("=" * 78)
 
-    # ---- incertezza (± dev. std) quando ci sono piu' ripetizioni ----------
+    # ---- uncertainty (± std dev) when there are several repetitions -------
     if args.repeats > 1:
-        print(f"\n  INCERTEZZA  (media ± dev. std su {args.repeats} ripetizioni)")
+        print(f"\n  UNCERTAINTY  (mean ± std dev over {args.repeats} repetitions)")
         print(f"    {'scenario':<22}{'controller':<10}{'PDR':>16}{'compr':>16}")
         for which in which_list:
             for mode in modes:
@@ -264,9 +264,9 @@ def main() -> None:
                       f"{pm*100:8.1f}% ±{ps*100:4.1f}{cm:9.2f}x ±{cs:4.2f}")
         print("=" * 78)
 
-    print(f"  Completato in {time.time()-t0:.0f}s")
+    print(f"  Completed in {time.time()-t0:.0f}s")
 
-    # ---- CSV opzionale ----------------------------------------------------
+    # ---- optional CSV -----------------------------------------------------
     if args.out:
         outp = args.out if os.path.isabs(args.out) else os.path.join(_ROOT, args.out)
         os.makedirs(os.path.dirname(outp) or ".", exist_ok=True)
@@ -275,7 +275,7 @@ def main() -> None:
                                + [k for k, _, _ in KPIS])
             w.writeheader()
             w.writerows(csv_rows)
-        print(f"  CSV grezzo salvato in {outp}")
+        print(f"  Raw CSV saved to {outp}")
 
 
 if __name__ == "__main__":

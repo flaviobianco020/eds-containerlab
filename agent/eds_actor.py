@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """
-eds_actor.py — Actor MAPPO (Fase 3) in Python puro, per il deploy sull'emulatore.
+eds_actor.py — MAPPO Actor (Phase 3) in pure Python, for deployment on the emulator.
 
-Carica il checkpoint JSON prodotto da examples/train_mappo.py del simulatore
-(formato "eds-mappo-v1") e ne calcola il forward pass SENZA numpy/torch:
-solo libreria standard. Cosi' la policy appresa nel simulatore puo' pilotare
-la macchina di stato dell'emulatore sulla rete vera (documento MAPPO,
-Tabella 10, riga "Deploy emulatore").
+Loads the JSON checkpoint produced by the simulator's examples/train_mappo.py
+(format "eds-mappo-v1") and computes its forward pass WITHOUT numpy/torch:
+standard library only. This way the policy learned in the simulator can drive
+the emulator's state machine on the real network (MAPPO document, Table 10,
+row "Emulator deploy").
 
-Architettura (identica a simulator/marl/networks.py, doc Tabella 5):
+Architecture (identical to simulator/marl/networks.py, doc Table 5):
     Input(7) → LayerNorm(non-affine) → Linear(7→64) → Tanh
              → Linear(64→64) → Tanh → Linear(64→3) → argmax
 
-Le azioni sono {0: ESCALATE, 1: MAINTAIN, 2: DE-ESCALATE} (doc Tabella 8).
+The actions are {0: ESCALATE, 1: MAINTAIN, 2: DE-ESCALATE} (doc Table 8).
 
-Il forward pass e' verificato per parita' numerica contro l'Actor NumPy del
-simulatore (vedi tools/check_actor_parity.py).
+The forward pass is verified for numerical parity against the simulator's NumPy
+Actor (see tools/check_actor_parity.py).
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ ESCALATE, MAINTAIN, DEESCALATE = 0, 1, 2
 
 
 def _matvec(vec, mat, out_dim):
-    """vec (len k) · mat (k righe × out_dim colonne) → lista out_dim."""
+    """vec (len k) · mat (k rows × out_dim columns) → list of out_dim."""
     out = [0.0] * out_dim
     for i, v in enumerate(vec):
         if v == 0.0:
@@ -40,7 +40,7 @@ def _matvec(vec, mat, out_dim):
 
 
 def _layernorm(x):
-    """LayerNorm non-affine: (x - media) / sqrt(varianza_popolazione + eps)."""
+    """Non-affine LayerNorm: (x - mean) / sqrt(population_variance + eps)."""
     n = len(x)
     mu = sum(x) / n
     var = sum((v - mu) ** 2 for v in x) / n
@@ -50,16 +50,16 @@ def _layernorm(x):
 
 class Actor:
     """
-    Policy π(a|o) in Python puro. Carica i pesi da un checkpoint JSON e
-    seleziona l'azione in modalita' deterministica (argmax), coerente con la
-    valutazione/deploy del documento (Tabella 10).
+    Policy π(a|o) in pure Python. Loads the weights from a JSON checkpoint and
+    selects the action deterministically (argmax), consistent with the
+    evaluation/deploy of the document (Table 10).
     """
 
     OBS_DIM = 7
     N_ACTIONS = 3
 
     def __init__(self, params: dict):
-        # params: dict con W1(7×64) b1(64) W2(64×64) b2(64) W3(64×3) b3(3)
+        # params: dict with W1(7×64) b1(64) W2(64×64) b2(64) W3(64×3) b3(3)
         self.W1 = params["W1"]; self.b1 = params["b1"]
         self.W2 = params["W2"]; self.b2 = params["b2"]
         self.W3 = params["W3"]; self.b3 = params["b3"]
@@ -72,16 +72,16 @@ class Actor:
         with open(path) as fh:
             blob = json.load(fh)
         if "actor" not in blob:
-            raise ValueError(f"{path}: non e' un checkpoint MAPPO (manca 'actor').")
+            raise ValueError(f"{path}: not a MAPPO checkpoint (missing 'actor').")
         params = {k: v for k, v in blob["actor"].items()}
         act = cls(params)
         act.meta = blob.get("meta", {})
         return act
 
     def logits(self, obs):
-        """obs: lista di 7 float → logits (lista di 3 float)."""
+        """obs: list of 7 floats → logits (list of 3 floats)."""
         if len(obs) != self.OBS_DIM:
-            raise ValueError(f"osservazione a {len(obs)} dim, attese {self.OBS_DIM}")
+            raise ValueError(f"observation has {len(obs)} dims, expected {self.OBS_DIM}")
         xhat = _layernorm(obs)
         z1 = _matvec(xhat, self.W1, self.h1)
         h1 = [b + z for b, z in zip(self.b1, z1)]
@@ -97,14 +97,14 @@ class Actor:
         if action_mask is None:
             return logits
         if len(action_mask) != len(logits):
-            raise ValueError("action_mask incompatibile con il numero di azioni")
+            raise ValueError("action_mask incompatible with the number of actions")
         if not any(action_mask):
-            raise ValueError("action_mask deve consentire almeno un'azione")
+            raise ValueError("action_mask must allow at least one action")
         return [v if allowed else -1e30
                 for v, allowed in zip(logits, action_mask)]
 
     def probs(self, obs, action_mask=None):
-        """Softmax stabile, eventualmente limitata alle azioni consentite."""
+        """Stable softmax, optionally restricted to the allowed actions."""
         lg = self._masked_logits(self.logits(obs), action_mask)
         m = max(lg)
         e = [math.exp(v - m) for v in lg]
@@ -112,7 +112,7 @@ class Actor:
         return [v / s for v in e]
 
     def act(self, obs, action_mask=None) -> int:
-        """Azione deterministica: argmax dei logits (== argmax softmax)."""
+        """Deterministic action: argmax of the logits (== argmax softmax)."""
         lg = self._masked_logits(self.logits(obs), action_mask)
         best_i, best_v = 0, lg[0]
         for i in range(1, len(lg)):

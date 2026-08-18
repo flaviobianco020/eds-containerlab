@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 """
-eds_node.py - Agente in-container per l'emulatore Event-Driven Simulator (EDS).
+eds_node.py - In-container agent for the Event-Driven Simulator (EDS) emulator.
 
-Gira DENTRO i container ContainerLab (montato in /opt/eds) e usa solo la
-standard library di Python 3. Due modalita':
+Runs INSIDE the ContainerLab containers (mounted at /opt/eds) and uses only the
+Python 3 standard library. Two modes:
 
-  recv : ricevitore UDP. Conta pacchetti/byte per flusso e misura la latenza
-         end-to-end (i container condividono il clock dell'host, quindi i
-         timestamp time.time() sono confrontabili tra sorgente e destinazione).
+  recv : UDP receiver. Counts packets/bytes per flow and measures the
+         end-to-end latency (the containers share the host clock, so the
+         time.time() timestamps are comparable between source and destination).
 
-  send : generatore UDP che riproduce i FlowModel del simulatore
-         (CBR / POISSON / BURSTY / PERIODIC_TELEMETRY / VIDEO / CONTROL) con le
-         STESSE formule di inter-arrivo di simulator/traffic/flow.py. Marca i
-         pacchetti con il DSCP (IP_TOS) corrispondente alla priorita' della
-         classe di traffico.
+  send : UDP generator that reproduces the simulator's FlowModel
+         (CBR / POISSON / BURSTY / PERIODIC_TELEMETRY / VIDEO / CONTROL) with the
+         SAME inter-arrival formulas as simulator/traffic/flow.py. Marks the
+         packets with the DSCP (IP_TOS) corresponding to the priority of the
+         traffic class.
 
-I parametri si passano via variabili d'ambiente (comodo con `docker exec -e`).
-Alla terminazione l'agente stampa su stdout una riga JSON con i risultati.
+Parameters are passed via environment variables (handy with `docker exec -e`).
+On termination the agent prints a JSON line with the results to stdout.
 """
 import sys
 import os
@@ -54,7 +54,7 @@ def run_recv():
     sock.bind(("0.0.0.0", port))
     sock.settimeout(0.5)
 
-    # flow_id -> contatori
+    # flow_id -> counters
     flows = {}
     running = {"on": True}
 
@@ -64,7 +64,7 @@ def run_recv():
     signal.signal(signal.SIGTERM, _stop)
     signal.signal(signal.SIGINT, _stop)
 
-    # grace extra per ricevere gli ultimi pacchetti in coda
+    # extra grace to receive the last queued packets
     stop_at = time.time() + duration + 3.0
     while running["on"] and time.time() < stop_at:
         try:
@@ -98,7 +98,7 @@ def run_send():
     port = _env("EDS_PORT", 5000, int)
     fid = _env("EDS_FLOW_ID", 0, int)
     model = _env("EDS_MODEL", "cbr")
-    rate = _env("EDS_RATE", 100.0, float)        # pacchetti al secondo
+    rate = _env("EDS_RATE", 100.0, float)        # packets per second
     size_lo = _env("EDS_SIZE_LO", 100, int)
     size_hi = _env("EDS_SIZE_HI", 100, int)
     tos = _env("EDS_TOS", 0, int)
@@ -106,7 +106,7 @@ def run_send():
     seed = _env("EDS_SEED", 42, int)
 
     if not dst:
-        sys.stderr.write("eds_node.py send: EDS_DST mancante\n")
+        sys.stderr.write("eds_node.py send: EDS_DST missing\n")
         sys.exit(2)
 
     rng = random.Random(seed + fid)
@@ -122,14 +122,14 @@ def run_send():
     seq = 0
 
     def inter_arrival():
-        # Identico a Flow.inter_arrival() del simulatore.
+        # Identical to Flow.inter_arrival() of the simulator.
         if model in ("poisson", "video"):
             return rng.expovariate(rate)
         if model == "bursty":
             if rng.random() < 0.1:
                 return rng.expovariate(rate * 5.0)
             return rng.expovariate(rate * 0.5)
-        # cbr, control, periodic_telemetry -> costante
+        # cbr, control, periodic_telemetry -> constant
         return 1.0 / rate
 
     end = time.time() + duration
@@ -159,7 +159,7 @@ def main():
     elif mode == "send":
         run_send()
     else:
-        sys.stderr.write("uso: eds_node.py [recv|send]\n")
+        sys.stderr.write("usage: eds_node.py [recv|send]\n")
         sys.exit(2)
 
 

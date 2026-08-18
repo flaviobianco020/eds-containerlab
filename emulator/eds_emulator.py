@@ -1,26 +1,26 @@
 #!/usr/bin/env python3
 """
-eds_emulator.py - Control-plane host-side dell'emulatore Event-Driven Simulator.
+eds_emulator.py - Host-side control-plane of the Event-Driven Simulator emulator.
 
-Porta sull'emulatore ContainerLab i componenti della Fase 1 che nel simulatore
-vivono in software, facendoli operare in TEMPO REALE sulla rete vera:
+Brings the Phase 1 components that live in software in the simulator onto the
+ContainerLab emulator, making them operate in REAL TIME on the real network:
 
-  * Traffic Generator   -> lancia l'agente UDP (agent/eds_node.py) nei container
-                           riproducendo i FlowModel/TrafficClass del simulatore.
-  * Event Scheduler     -> RTScheduler: heap di eventi su wall-clock reale.
-  * Congestion State    -> CongestionStateMachine identica a simulator/network/
-    Machine                congestion.py, alimentata dall'occupancy reale letta
-                           da `tc -s qdisc`, applica DROP_LOW_PRIORITY via tc.
-  * Queue Manager       -> e' la qdisc tbf+netem(limit) creata da deploy.sh;
-                           qui la leggiamo (backlog, drop, sent).
-  * Metrics Engine      -> throughput, PDR, latenza, occupancy, drop,
-                           transizioni di stato, fairness.
+  * Traffic Generator   -> launches the UDP agent (agent/eds_node.py) in the
+                           containers, reproducing the simulator's FlowModel/TrafficClass.
+  * Event Scheduler     -> RTScheduler: event heap on the real wall-clock.
+  * Congestion State    -> CongestionStateMachine identical to simulator/network/
+    Machine                congestion.py, fed by the real occupancy read from
+                           `tc -s qdisc`, applies DROP_LOW_PRIORITY via tc.
+  * Queue Manager       -> is the tbf+netem(limit) qdisc created by deploy.sh;
+                           here we read it (backlog, drop, sent).
+  * Metrics Engine      -> throughput, PDR, latency, occupancy, drop,
+                           state transitions, fairness.
 
-NB: la rete (topologia, capacita', code) e' quella deployata da ./deploy.sh.
-Questo modulo NON modifica la topologia: la guida e la misura.
+NB: the network (topology, capacity, queues) is the one deployed by ./deploy.sh.
+This module does NOT modify the topology: it drives it and measures it.
 
-Richiede: Docker, un lab gia' deployato, e python3 dentro i container
-(immagine ghcr.io/srl-labs/network-multitool) con l'agente montato in /opt/eds.
+Requires: Docker, an already-deployed lab, and python3 inside the containers
+(ghcr.io/srl-labs/network-multitool image) with the agent mounted at /opt/eds.
 """
 from __future__ import annotations
 
@@ -36,8 +36,8 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Callable, Optional
 
-# L'Actor MAPPO (Fase 3) vive in agent/eds_actor.py: aggiungo la cartella al path
-# cosi' il control-plane puo' caricarlo per il deploy della policy appresa.
+# The MAPPO Actor (Phase 3) lives in agent/eds_actor.py: add the folder to the
+# path so the control-plane can load it to deploy the learned policy.
 _AGENT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "agent")
 if _AGENT_DIR not in sys.path:
     sys.path.insert(0, _AGENT_DIR)
@@ -48,55 +48,55 @@ COMP_STATE_FILE = "/tmp/eds_comp_state"
 COMP_STATS_FILE = "/tmp/eds_comp_stats"
 NFQUEUE_NUM     = 1
 
-# Lunghezza IP minima (byte) per cui un pacchetto passa dal compressore NFQUEUE.
-# Default 500: solo VIDEO (>=~1428B) viene compresso; CONTROL (128B) e TELEMETRY
-# (228-328B) bypassano, per non caricare lo userspace. Abbassandola a ~200 anche
-# TELEMETRY (dati strutturati, comprime ~4x) entra: leva per il PDR dello
-# scenario 5 (bound teorico ->100%), al costo di piu' carico sul compressore.
+# Minimum IP length (bytes) for a packet to go through the NFQUEUE compressor.
+# Default 500: only VIDEO (>=~1428B) is compressed; CONTROL (128B) and TELEMETRY
+# (228-328B) bypass, so as not to load the userspace. Lowering it to ~200 lets
+# TELEMETRY (structured data, compresses ~4x) in too: a lever for the PDR of
+# scenario 5 (theoretical bound ->100%), at the cost of more load on the compressor.
 #   EDS_NFQUEUE_MINLEN=200 python3 emulator/scenarios.py 5 --phase2
 NFQUEUE_MINLEN  = int(os.environ.get("EDS_NFQUEUE_MINLEN", "500"))
 
-# Ritardo della netem sul collo di bottiglia. DEFAULT 0ms (collo BYTE-limited,
-# in parità col simulatore). Con un ritardo, per la legge di Little i pacchetti
-# in volo sono rate*delay: con `limit 20` il ritardo "consuma" il buffer e il
-# collo satura a limit/delay pkt/s INDIPENDENTE dai byte -> la compressione non
-# alza il PDR (scenari 1/5), perché il servizio diventa ∝ pacchetti invece che
-# ∝ byte. Con delay=0 il buffer è un drop-tail puro, il vincolo torna la banda
-# (tbf) e la compressione svuota la coda. La latenza del link vive sui link di
-# accesso (deploy.sh, 5ms). Per riprodurre il vecchio comportamento packet-limited:
+# Netem delay on the bottleneck. DEFAULT 0ms (BYTE-limited bottleneck, on par
+# with the simulator). With a delay, by Little's law the packets in flight are
+# rate*delay: with `limit 20` the delay "consumes" the buffer and the bottleneck
+# saturates at limit/delay pkt/s INDEPENDENT of the bytes -> compression does not
+# raise the PDR (scenarios 1/5), because the service becomes ∝ packets instead of
+# ∝ bytes. With delay=0 the buffer is a pure drop-tail, the constraint goes back
+# to the bandwidth (tbf) and compression empties the queue. The link latency lives
+# on the access links (deploy.sh, 5ms). To reproduce the old packet-limited behavior:
 #   EDS_BOTTLENECK_DELAY=5ms python3 emulator/scenarios.py 1 --mappo CKPT
 BOTTLENECK_DELAY = os.environ.get("EDS_BOTTLENECK_DELAY", "0ms")
 
-# --- Fase 3: parametri di osservazione dell'Actor (specchio di simulator/marl/env.py)
-MAPPO_DT          = 1.0    # cadenza di decisione della policy: 1 s (== env.DT)
-MAPPO_T_MAX_STATE = 30.0   # normalizzazione t_stato/T_max (doc Tabella 7)
-MAPPO_CAP_BPS     = 10e6   # capacita' nominale del collo di bottiglia (10 Mbit/s)
+# --- Phase 3: Actor observation parameters (mirror of simulator/marl/env.py)
+MAPPO_DT          = 1.0    # policy decision cadence: 1 s (== env.DT)
+MAPPO_T_MAX_STATE = 30.0   # normalization t_state/T_max (doc Table 7)
+MAPPO_CAP_BPS     = 10e6   # nominal bottleneck capacity (10 Mbit/s)
 MAPPO_EMERGENCY_OCCUPANCY = float(os.environ.get("EDS_MAPPO_EMERGENCY_OCC", "0.95"))
 MAPPO_ACTION_NAMES = ("ESCALATE", "MAINTAIN", "DEESCALATE")
 
-# --- Fase 3: guardrail anti-compressione-a-vuoto (deploy-side, OPT-IN) -------
-# STORIA: la policy MAPPO originale (checkpoint "current") era addestrata con una
-# reward SENZA costo di compressione, in un simulatore dove la compressione e' NON
-# distruttiva (simulator/control/compressor.py imposta pkt.compressed_size SENZA
-# toccare pkt.size). Li' comprimere e' quasi gratis, quindi la policy comprimeva
-# volentieri. Sull'emulatore la compressione e' DISTRUTTIVA (eds_compressor.py
-# tronca il payload) e ogni pacchetto paga la latenza del middlebox NFQUEUE:
-# comprimere quando NON stiamo perdendo pacchetti butta throughput senza migliorare
-# il PDR (scenario 2). Per tappare quel comportamento serviva questo guardrail
-# lato deploy: ESCALATE ammesso solo sotto PRESSIONE DI PERDITA reale (drop_rate
-# oltre soglia) o emergenza coda. (L'occupancy da sola NON basta: nello scenario 2
-# la coda sta al 60-75% anche a rete scarica per via del flusso CONTROL, ~2500
-# pkt/s di pacchetti piccoli, senza traboccare -> drop~0, PDR~100%.)
+# --- Phase 3: anti-empty-compression guardrail (deploy-side, OPT-IN) --------
+# HISTORY: the original MAPPO policy (checkpoint "current") was trained with a
+# reward WITHOUT compression cost, in a simulator where compression is NON
+# destructive (simulator/control/compressor.py sets pkt.compressed_size WITHOUT
+# touching pkt.size). There compressing is nearly free, so the policy compressed
+# eagerly. On the emulator compression is DESTRUCTIVE (eds_compressor.py truncates
+# the payload) and every packet pays the latency of the NFQUEUE middlebox:
+# compressing when we are NOT losing packets throws away throughput without
+# improving the PDR (scenario 2). To plug that behavior this deploy-side guardrail
+# was needed: ESCALATE allowed only under real LOSS PRESSURE (drop_rate above
+# threshold) or queue emergency. (Occupancy alone is NOT enough: in scenario 2
+# the queue sits at 60-75% even on an idle network because of the CONTROL flow,
+# ~2500 pkt/s of small packets, without overflowing -> drop~0, PDR~100%.)
 #
-# ORA: il checkpoint "mappo_ccgated" e' addestrato con la reward a COSTO DI
-# COMPRESSIONE GATED (-lambda_c*(mean_state/4)*(1-congestione)): la penalita' si
-# paga solo a rete scarica, azzerandosi sotto congestione. Cosi' la policy
-# autoregola la compressione ALLA SORGENTE e il guardrail lato deploy diventa
-# ridondante (verificato: scenario 2 a gate OFF -> 1.00x, nessuno spreco). Percio'
-# il guardrail e' DISATTIVO di default. Resta come opt-in (EDS_MAPPO_GATE=1) per i
-# checkpoint legacy senza compression-cost, che senza guardrail sprecano su S2.
+# NOW: the checkpoint "mappo_ccgated" is trained with the GATED COMPRESSION COST
+# reward (-lambda_c*(mean_state/4)*(1-congestion)): the penalty is paid only on an
+# idle network, vanishing under congestion. This way the policy self-regulates
+# compression AT THE SOURCE and the deploy-side guardrail becomes redundant
+# (verified: scenario 2 at gate OFF -> 1.00x, no waste). Therefore the guardrail
+# is OFF by default. It stays as opt-in (EDS_MAPPO_GATE=1) for the legacy
+# checkpoints without compression-cost, which waste on S2 without the guardrail.
 MAPPO_COMPRESSION_GATE = os.environ.get("EDS_MAPPO_GATE", "0") != "0"
-MAPPO_GATE_DROP_RATE = float(os.environ.get("EDS_MAPPO_GATE_DROP_RATE", "0.01"))  # frazione di arrivi persi oltre cui l'ESCALATE e' giustificato (sweep con EDS_MAPPO_GATE_DROP_RATE)
+MAPPO_GATE_DROP_RATE = float(os.environ.get("EDS_MAPPO_GATE_DROP_RATE", "0.01"))  # fraction of lost arrivals above which ESCALATE is justified (sweep with EDS_MAPPO_GATE_DROP_RATE)
 MAPPO_TRACE_FEATURES = (
     "ewma_occupancy", "congestion_state", "high_priority_ratio",
     "low_priority_ratio", "drop_rate", "link_utilisation", "time_in_state",
@@ -109,11 +109,11 @@ _QDISC_BACKLOG_RE = re.compile(r"backlog \S+ (\d+)p")
 
 def parse_qdisc_stats(output: str, queue_limit: int,
                       queue_handle: str = "10:") -> dict:
-    """Estrae contatori senza sommare qdisc padre e figlia.
+    """Extracts counters without summing the parent and child qdisc.
 
-    Il TBF root e la netem figlia espongono spesso lo stesso drop. Il traffico
-    trasmesso viene letto dalla root, mentre drop e backlog provengono dalla
-    netem che implementa la coda finita.
+    The TBF root and the netem child often expose the same drop. The transmitted
+    traffic is read from the root, while drop and backlog come from the netem
+    that implements the finite queue.
     """
     blocks = [b for b in re.split(r"(?=^qdisc )", output, flags=re.MULTILINE)
               if b.startswith("qdisc ")]
@@ -142,39 +142,39 @@ def parse_qdisc_stats(output: str, queue_limit: int,
 def mappo_action_mask(now: float, last_transition: float,
                       min_state_dwell: float, occupancy: float,
                       drop_rate: float = 0.0) -> list[bool]:
-    """Vincolo di deploy identico al simulatore robusto (dwell + override di
-    emergenza). Il guardrail anti-compressione-a-vuoto (MAPPO_COMPRESSION_GATE)
-    e' OPT-IN e disattivo di default: con la policy a costo di compressione gated
-    non serve, quindi con dwell=0 la maschera e' [True,True,True] (policy pura).
+    """Deploy constraint identical to the robust simulator (dwell + emergency
+    override). The anti-empty-compression guardrail (MAPPO_COMPRESSION_GATE) is
+    OPT-IN and off by default: with the gated-compression-cost policy it is not
+    needed, so with dwell=0 the mask is [True,True,True] (pure policy).
 
-    Ordine azioni: [ESCALATE, MAINTAIN, DEESCALATE].
+    Action order: [ESCALATE, MAINTAIN, DEESCALATE].
     """
     dwell_ok = min_state_dwell <= 0.0 or now - last_transition >= min_state_dwell
     if not dwell_ok:
-        # Congelamento durante il dwell (come nel simulatore robusto), con
-        # override di emergenza che lascia salire se la coda e' quasi piena.
+        # Freeze during the dwell (as in the robust simulator), with an emergency
+        # override that lets it rise if the queue is almost full.
         if occupancy >= MAPPO_EMERGENCY_OCCUPANCY:
             return [True, True, False]
         return [False, True, False]
-    # Dwell soddisfatto: azioni libere, MA niente ESCALATE "a vuoto". Comprimere
-    # ha senso solo sotto pressione di perdita reale (o emergenza coda); senza,
-    # un ESCALATE riduce solo il throughput a PDR gia' pieno.
+    # Dwell satisfied: free actions, BUT no "empty" ESCALATE. Compressing only
+    # makes sense under real loss pressure (or queue emergency); without it, an
+    # ESCALATE only reduces the throughput at an already-full PDR.
     escalate_ok = (not MAPPO_COMPRESSION_GATE
                    or drop_rate > MAPPO_GATE_DROP_RATE
                    or occupancy >= MAPPO_EMERGENCY_OCCUPANCY)
     return [escalate_ok, True, True]
 
 # ----------------------- Traffic classes / FlowModel ------------------------
-# Rispecchiano le classi usate in examples/scenarios.py del simulatore.
-# tuple: (size_lo, size_hi, priority, tos)  -- tos = DSCP per la priorita'.
-#   priority 0 (control)   -> CS6  0xc0  (protetto)
+# They mirror the classes used in the simulator's examples/scenarios.py.
+# tuple: (size_lo, size_hi, priority, tos)  -- tos = DSCP for the priority.
+#   priority 0 (control)   -> CS6  0xc0  (protected)
 #   priority 1 (telemetry) -> CS2  0x40
 #   priority 2 (video)     -> AF11 0x28
 VIDEO = (1400, 1500, 2, 0x28)
 TELEMETRY = (200, 300, 1, 0x40)
 CONTROL = (100, 100, 0, 0xc0)
 
-# DSCP scartati quando lo stato e' DROP_LOW_PRIORITY (priority > 0)
+# DSCP dropped when the state is DROP_LOW_PRIORITY (priority > 0)
 LOW_PRIORITY_TOS = (0x28, 0x40)
 
 
@@ -188,7 +188,7 @@ class FlowModel(str, Enum):
 
 
 # ----------------------- Congestion State Machine ---------------------------
-# Identica a simulator/network/congestion.py.
+# Identical to simulator/network/congestion.py.
 class CongestionState(Enum):
     NORMAL = 0
     HEADER_COMPRESSION = 1
@@ -204,18 +204,18 @@ DEFAULT_THRESHOLDS = {
     CongestionState.DROP_LOW_PRIORITY: 0.95,
 }
 
-# Fase 2 (eFRAC paper §3.3) — identici a simulator/network/congestion.py
+# Phase 2 (eFRAC paper §3.3) — identical to simulator/network/congestion.py
 PHASE2_EWMA_ALPHA: float = 0.125           # Jacobson/Karn α
-PHASE2_ESCALATION_DEBOUNCE: float = 1.5   # secondi di eccedenza sostenuta prima di salire
-PHASE2_DEESCALATION_COOLDOWN: float = 4.5 # secondi sotto soglia prima di scendere (3:1)
+PHASE2_ESCALATION_DEBOUNCE: float = 1.5   # seconds of sustained excess before rising
+PHASE2_DEESCALATION_COOLDOWN: float = 4.5 # seconds below threshold before falling (3:1)
 
 
 class CongestionStateMachine:
     """
-    Fase 1 (default): transizioni istantanee, nessuno smoothing — backward-compatible.
-    Fase 2 (enable_phase2=True): EWMA α=1/8 + hysteresis asimmetrica (eFRAC §3.3).
+    Phase 1 (default): instantaneous transitions, no smoothing — backward-compatible.
+    Phase 2 (enable_phase2=True): EWMA α=1/8 + asymmetric hysteresis (eFRAC §3.3).
 
-    Identica a simulator/network/congestion.py.
+    Identical to simulator/network/congestion.py.
     """
 
     def __init__(self, thresholds=None,
@@ -259,8 +259,8 @@ class CongestionStateMachine:
 
     def update(self, occupancy: float, sim_time: float = 0.0) -> bool:
         """
-        Fase 1 (alpha=1.0, debounce=0.0): salto istantaneo al target, nessuno smoothing.
-        Fase 2: EWMA + un passo alla volta con debounce/cooldown asimmetrici.
+        Phase 1 (alpha=1.0, debounce=0.0): instant jump to the target, no smoothing.
+        Phase 2: EWMA + one step at a time with asymmetric debounce/cooldown.
         """
         self._ewma = (1.0 - self._alpha) * self._ewma + self._alpha * occupancy
         target = self.evaluate(self._ewma)
@@ -299,14 +299,14 @@ class CongestionStateMachine:
             return False
 
 
-# Ratio attese per stato (media pesata sui tre traffic class del simulatore).
-# Usate per stimare il compression_ratio nelle metriche quando enable_phase2=True.
-# Fonte: simulator/control/compressor.py _RATIOS, media (pri=0, pri=1, pri=2).
+# Expected ratios per state (weighted average over the simulator's three traffic classes).
+# Used to estimate the compression_ratio in the metrics when enable_phase2=True.
+# Source: simulator/control/compressor.py _RATIOS, average (pri=0, pri=1, pri=2).
 #   NORMAL        : 1.00
-#   HC            : media(0.760,0.904,0.983) = 0.882 → ratio=1/0.882≈1.13
-#   DELTA         : media(0.550,0.500,0.667) = 0.572 → ratio=1/0.572≈1.75
-#   INCREMENTAL   : media(0.500,0.250,0.667) = 0.472 → ratio=1/0.472≈2.12
-#   DROP          : solo CONTROL sopravvive → ratio conservativa ≈ 1.0
+#   HC            : mean(0.760,0.904,0.983) = 0.882 → ratio=1/0.882≈1.13
+#   DELTA         : mean(0.550,0.500,0.667) = 0.572 → ratio=1/0.572≈1.75
+#   INCREMENTAL   : mean(0.500,0.250,0.667) = 0.472 → ratio=1/0.472≈2.12
+#   DROP          : only CONTROL survives → conservative ratio ≈ 1.0
 _EXPECTED_COMPRESSION_RATIO: dict[str, float] = {
     "NORMAL":                  1.00,
     "HEADER_COMPRESSION":      1.13,
@@ -315,27 +315,27 @@ _EXPECTED_COMPRESSION_RATIO: dict[str, float] = {
     "DROP_LOW_PRIORITY":       1.00,
 }
 
-# --------------------------------- Topologie --------------------------------
+# --------------------------------- Topologies --------------------------------
 @dataclass
 class Topo:
     key: str
-    lab: str               # nome lab ContainerLab (prefisso container clab-<lab>-)
+    lab: str               # ContainerLab lab name (container prefix clab-<lab>-)
     dst_node: str
     dst_ip: str
-    bottleneck_node: str   # nodo su cui leggere/agire la coda
+    bottleneck_node: str   # node on which to read/act the queue
     bottleneck_if: str
     queue_limit: int = 20
-    entry_node: Optional[str] = None  # se valorizzato, tutti i flussi entrano da qui
-                                      # (topologie a percorso unico: multi_hop, mesh)
+    entry_node: Optional[str] = None  # if set, all flows enter here
+                                      # (single-path topologies: multi_hop, mesh)
 
 
 TOPOS = {
     "single_bottleneck": Topo("single_bottleneck", "single-bottleneck",
                               "dst", "10.0.30.1", "router", "eth4", 20),
-    # multi_hop e mesh sono topologie a percorso unico: un solo nodo d'ingresso
-    # (entry_node) da cui tutti i flussi partono, e la coda monitorata/compressa e'
-    # quella del primo hop. Gli scenari canonici (sorgenti src0/1/2) vengono
-    # rimappati su questo nodo in run_emulation.
+    # multi_hop and mesh are single-path topologies: a single entry node
+    # (entry_node) from which all flows start, and the monitored/compressed queue
+    # is the one of the first hop. The canonical scenarios (sources src0/1/2) are
+    # remapped onto this node in run_emulation.
     "multi_hop": Topo("multi_hop", "multi-hop",
                       "n3", "10.0.3.2", "n0", "eth1", 20, entry_node="n0"),
     "mesh": Topo("mesh", "mesh",
@@ -345,14 +345,14 @@ TOPOS = {
 
 # ------------------------------- docker / tc --------------------------------
 class Net:
-    """Helper per eseguire comandi nei container e leggere/agire su tc."""
+    """Helper to run commands in the containers and read/act on tc."""
 
     def __init__(self, topo: Topo, verbose: bool = True):
         self.topo = topo
         self.verbose = verbose
         self._drop_active = False
-        self._comp_rules = []    # spec esatte delle regole iptables NFQUEUE (FORWARD/OUTPUT)
-        # parametri correnti della netem del collo (per il guasto via loss 100%)
+        self._comp_rules = []    # exact specs of the NFQUEUE iptables rules (FORWARD/OUTPUT)
+        # current netem parameters of the bottleneck (for the failure via loss 100%)
         self._netem_delay = "0ms"
         self._netem_limit = topo.queue_limit
 
@@ -372,100 +372,100 @@ class Net:
         try:
             r = self.exec(node, "python3", "--version", timeout=10.0)
         except (subprocess.TimeoutExpired, FileNotFoundError) as e:
-            raise RuntimeError(f"Impossibile contattare {self.container(node)}: {e}")
+            raise RuntimeError(f"Cannot reach {self.container(node)}: {e}")
         if r.returncode != 0:
             raise RuntimeError(
-                "python3 non trovato nel container. Installa con "
+                "python3 not found in the container. Install with "
                 f"`docker exec {self.container(node)} apk add --no-cache python3` "
-                "oppure usa un'immagine con python3.")
+                "or use an image with python3.")
         r = self.exec(node, "test", "-f", AGENT_PATH, timeout=10.0)
         if r.returncode != 0:
             raise RuntimeError(
-                f"Agente non montato in {AGENT_PATH}. Verifica i `binds` nel file "
-                ".clab.yml (../agent:/opt/eds:ro) e ridai il deploy.")
+                f"Agent not mounted at {AGENT_PATH}. Check the `binds` in the "
+                ".clab.yml file (../agent:/opt/eds:ro) and redeploy.")
 
-    # --- lettura coda (Queue Manager) ---------------------------------------
+    # --- queue read (Queue Manager) -----------------------------------------
     def qdisc_stats(self) -> dict:
-        """Legge tc -s qdisc sull'interfaccia del collo di bottiglia."""
+        """Reads tc -s qdisc on the bottleneck interface."""
         r = self.sh(self.topo.bottleneck_node,
                     f"tc -s qdisc show dev {self.topo.bottleneck_if}")
         return parse_qdisc_stats(r.stdout or "", self.topo.queue_limit)
 
-    # --- azioni dello scheduler / state machine -----------------------------
+    # --- scheduler / state machine actions ----------------------------------
     def set_bottleneck_rate(self, rate_mbit: float):
         node, iface = self.topo.bottleneck_node, self.topo.bottleneck_if
         self.sh(node, f"tc qdisc change dev {iface} root handle 1: "
                       f"tbf rate {rate_mbit}mbit burst 1mbit limit 1m")
         if self.verbose:
-            print(f"      [tc] {iface}: banda -> {rate_mbit} Mbit/s")
+            print(f"      [tc] {iface}: bandwidth -> {rate_mbit} Mbit/s")
 
     def set_queue_limit(self, limit_pkts: int, delay: str = "0ms"):
-        """Allinea il drop-tail della coda (netem limit) al valore richiesto.
-        delay=0 => collo byte-limited (drop-tail puro); vedi BOTTLENECK_DELAY."""
+        """Aligns the queue drop-tail (netem limit) to the requested value.
+        delay=0 => byte-limited bottleneck (pure drop-tail); see BOTTLENECK_DELAY."""
         node, iface = self.topo.bottleneck_node, self.topo.bottleneck_if
         self._netem_delay = delay
         self._netem_limit = limit_pkts
         self.sh(node, f"tc qdisc change dev {iface} parent 1:1 handle 10: "
                       f"netem delay {delay} limit {limit_pkts}")
         if self.verbose:
-            print(f"      [tc] {iface}: coda drop-tail -> {limit_pkts} pacchetti")
+            print(f"      [tc] {iface}: drop-tail queue -> {limit_pkts} packets")
 
     def link_down(self):
-        # Guasto modellato con netem 'loss 100%' invece di 'ip link down': tutti i
-        # pacchetti sul collo vengono scartati, ma l'interfaccia resta su e le route
-        # (incluse quelle STATICHE dei nodi-sorgente su multi_hop/mesh) NON vengono
-        # rimosse dal kernel -> il recupero e' pulito su ogni topologia. Preserva
-        # delay e limit correnti della netem.
+        # Failure modeled with netem 'loss 100%' instead of 'ip link down': all the
+        # packets on the bottleneck are dropped, but the interface stays up and the
+        # routes (including the STATIC ones of the source nodes on multi_hop/mesh)
+        # are NOT removed by the kernel -> recovery is clean on every topology.
+        # Preserves the current netem delay and limit.
         node, iface = self.topo.bottleneck_node, self.topo.bottleneck_if
         self.sh(node, f"tc qdisc change dev {iface} parent 1:1 handle 10: "
                       f"netem delay {self._netem_delay} limit {self._netem_limit} loss 100%")
         if self.verbose:
-            print("      [link] collo di bottiglia GIU' (netem loss 100%, route intatte)")
+            print("      [link] bottleneck DOWN (netem loss 100%, routes intact)")
 
     def link_up(self):
-        # Ripristino: netem senza loss (delay+limit correnti).
+        # Restore: netem without loss (current delay+limit).
         node, iface = self.topo.bottleneck_node, self.topo.bottleneck_if
         self.sh(node, f"tc qdisc change dev {iface} parent 1:1 handle 10: "
                       f"netem delay {self._netem_delay} limit {self._netem_limit}")
         if self.verbose:
-            print("      [link] collo di bottiglia SU")
+            print("      [link] bottleneck UP")
 
-    # --- Pulizia stato residuo da run precedenti ----------------------------
+    # --- Cleanup of residual state from previous runs -----------------------
 
     def cleanup_stale(self, port: int = 5000):
         """
-        Rimuove eventuali artefatti lasciati da run precedenti interrotti:
-          - uccide il processo compressore ancora in vita (causa ENOBUFS sul kernel)
-          - svuota la catena FORWARD (regole NFQUEUE o DROP residue)
-          - rimuove i filtri tc DROP_LOW_PRIORITY
+        Removes any artifacts left by previous interrupted runs:
+          - kills the compressor process still alive (causes ENOBUFS in the kernel)
+          - flushes the FORWARD chain (residual NFQUEUE or DROP rules)
+          - removes the DROP_LOW_PRIORITY tc filters
 
-        Chiamata SEMPRE all'inizio di run_emulation, indipendentemente dalla modalita'.
-        Questo evita che una run Phase 2 interrotta blocchi le run Phase 1 successive
-        a causa di una regola NFQUEUE con queue piena (pacchetti droppati da kernel).
+        ALWAYS called at the start of run_emulation, regardless of the mode.
+        This prevents an interrupted Phase 2 run from blocking subsequent Phase 1
+        runs because of an NFQUEUE rule with a full queue (packets dropped by kernel).
         """
         node, iface = self.topo.bottleneck_node, self.topo.bottleneck_if
         self.sh(node,
                 "pid=$(cat /tmp/eds_comp.pid 2>/dev/null); "
                 "[ -n \"$pid\" ] && kill \"$pid\" 2>/dev/null; true")
         self.sh(node, "iptables -F FORWARD 2>/dev/null || true")
-        self.sh(node, "iptables -F OUTPUT 2>/dev/null || true")  # regole NFQUEUE residue su nodo-sorgente (multi_hop/mesh)
+        self.sh(node, "iptables -F OUTPUT 2>/dev/null || true")  # residual NFQUEUE rules on the source node (multi_hop/mesh)
         self.apply_drop_low_priority(False)
 
-    # --- Fase 2: compressore NFQUEUE lato router ----------------------------
+    # --- Phase 2: NFQUEUE compressor on the router side ---------------------
 
     def install_compressor_deps(self):
         """
-        Installa libnetfilter_queue + NetfilterQueue Python nel container router.
-        Chiamata una volta sola all'avvio dello scenario con enable_phase2=True.
+        Installs libnetfilter_queue + NetfilterQueue Python in the router container.
+        Called once at the start of the scenario with enable_phase2=True.
         """
         node = self.topo.bottleneck_node
-        print(f"  [compressor] installazione dipendenze in {node} ...")
-        # Alpine: toolchain di build + header dev + runtime libs + pip
+        print(f"  [compressor] installing dependencies in {node} ...")
+        # Alpine: build toolchain + dev headers + runtime libs + pip
         self.sh(node,
                 "apk add --no-cache gcc musl-dev python3-dev py3-pip linux-headers "
                 "libnetfilter_queue libnetfilter_queue-dev libmnl libmnl-dev 2>&1 | tail -1",
                 timeout=180.0)
-        # NetfilterQueue (estensione C, compilata da sorgente)
+        # NetfilterQueue (C extension, compiled from source)
         r = self.sh(node,
                     "python3 -m pip install --break-system-packages -q NetfilterQueue 2>&1 || "
                     "python3 -m pip install -q NetfilterQueue 2>&1",
@@ -473,93 +473,92 @@ class Net:
         last = (r.stdout or "").strip().splitlines()
         if last:
             print(f"      [pip] {last[-1]}")
-        # verifica che l'import funzioni davvero (fallisce subito se manca qualcosa)
+        # verify the import actually works (fails immediately if something is missing)
         chk = self.sh(node, "python3 -c 'import netfilterqueue' 2>&1")
         if chk.returncode != 0:
-            raise RuntimeError("NetfilterQueue non importabile nel router: "
+            raise RuntimeError("NetfilterQueue not importable in the router: "
                                + (chk.stdout or "").strip())
-        print("      [compressor] NetfilterQueue pronto")
+        print("      [compressor] NetfilterQueue ready")
 
     def start_compressor(self, port: int = 5000):
         """
-        Aggiunge la regola iptables NFQUEUE sul link bottleneck e avvia
-        eds_compressor.py in background nel container router.
+        Adds the NFQUEUE iptables rule on the bottleneck link and starts
+        eds_compressor.py in the background in the router container.
 
-        La regola intercetta solo UDP verso la porta del ricevitore (EDS_PORT)
-        in transito sull'interfaccia di uscita del collo di bottiglia.
-        --queue-bypass: se il processo crasha, i pacchetti passano non compressi
-        invece di essere scartati (fail-open per robustezza).
+        The rule intercepts only UDP towards the receiver port (EDS_PORT)
+        transiting on the egress interface of the bottleneck.
+        --queue-bypass: if the process crashes, the packets pass through
+        uncompressed instead of being dropped (fail-open for robustness).
         """
         node, iface = self.topo.bottleneck_node, self.topo.bottleneck_if
-        # Stato iniziale = 0 (NORMAL)
+        # Initial state = 0 (NORMAL)
         self.sh(node, f"echo 0 > {COMP_STATE_FILE}")
-        # Solo pacchetti >= 500 byte (IP totale) passano per NFQUEUE.
-        # I pacchetti CONTROL (100 B payload = 128 B IP) passano direttamente:
-        # riduce il carico sul processo Python userspace di ~90%.
-        self.sh(node, f"rm -f {COMP_STATS_FILE}")  # azzera i contatori del run precedente
-        # Aggancia la regola a FORWARD *e* OUTPUT: sul single_bottleneck il nodo
-        # compressore INOLTRA il traffico (catena FORWARD), ma sulle topologie a
-        # percorso unico (multi_hop/mesh) il nodo d'ingresso ORIGINA il traffico
-        # (catena OUTPUT). Un pacchetto attraversa una sola delle due catene, quindi
-        # non c'e' doppia compressione; agganciarle entrambe rende il compressore
-        # indipendente dal ruolo del nodo.
+        # Only packets >= 500 bytes (total IP) go through NFQUEUE.
+        # The CONTROL packets (100 B payload = 128 B IP) pass directly:
+        # reduces the load on the userspace Python process by ~90%.
+        self.sh(node, f"rm -f {COMP_STATS_FILE}")  # reset the counters of the previous run
+        # Hook the rule on FORWARD *and* OUTPUT: on single_bottleneck the compressor
+        # node FORWARDS the traffic (FORWARD chain), but on the single-path
+        # topologies (multi_hop/mesh) the entry node ORIGINATES the traffic (OUTPUT
+        # chain). A packet crosses only one of the two chains, so there is no double
+        # compression; hooking both makes the compressor independent of the node's role.
         rule_spec = (f"-o {iface} -p udp --dport {port} "
                      f"-m length --length {NFQUEUE_MINLEN}:65535 "
                      f"-j NFQUEUE --queue-num {NFQUEUE_NUM} --queue-bypass")
         self._comp_rules = [f"FORWARD {rule_spec}", f"OUTPUT {rule_spec}"]
-        # rimuove eventuali regole residue da run precedenti, poi aggiunge
+        # removes any residual rules from previous runs, then adds
         for rule in self._comp_rules:
             self.sh(node, f"iptables -D {rule} 2>/dev/null || true")
             self.sh(node, f"iptables -A {rule}")
-        # Avvia compressore in background, log in /tmp/eds_comp.log
+        # Start the compressor in the background, log in /tmp/eds_comp.log
         self.sh(node,
                 f"python3 {COMPRESSOR_PATH} {NFQUEUE_NUM} "
                 f"> /tmp/eds_comp.log 2>&1 & echo $! > /tmp/eds_comp.pid")
-        time.sleep(0.8)  # attendi avvio processo
-        # Health-check: se il processo e' morto all'avvio (es. import fallito dopo
-        # un'installazione flaky), rimuovo la regola -> fail-open REALE. Con la
-        # regola presente e nessun consumatore, --queue-bypass dovrebbe bastare,
-        # ma togliere la regola elimina ogni rischio di black-hole residuo.
+        time.sleep(0.8)  # wait for the process to start
+        # Health-check: if the process died at startup (e.g. failed import after a
+        # flaky install), remove the rule -> REAL fail-open. With the rule present
+        # and no consumer, --queue-bypass should be enough, but removing the rule
+        # eliminates any risk of a residual black-hole.
         alive = self.sh(node,
                         "pid=$(cat /tmp/eds_comp.pid 2>/dev/null); "
                         "[ -n \"$pid\" ] && kill -0 \"$pid\" 2>/dev/null "
                         "&& echo alive || echo dead")
         log = self.sh(node, "cat /tmp/eds_comp.log")
         if "alive" not in (alive.stdout or ""):
-            print("      [compressor] AVVISO: processo non attivo dopo lo start "
-                  "-> rimuovo la regola NFQUEUE (fail-open).")
+            print("      [compressor] WARNING: process not active after start "
+                  "-> removing the NFQUEUE rule (fail-open).")
             print(f"      [compressor:log] {(log.stdout or '').strip()}")
             for rule in self._comp_rules:
                 self.sh(node, f"iptables -D {rule} 2>/dev/null || true")
             self._comp_rules = []
         else:
             nfq = self.nfqueue_stats()
-            bound = "si" if (nfq and nfq.get("peer_portid", 0) != 0) else "NO"
+            bound = "yes" if (nfq and nfq.get("peer_portid", 0) != 0) else "NO"
             if self.verbose:
                 print(f"      [compressor] {(log.stdout or '').strip()}  "
-                      f"(pid vivo, coda bound: {bound})")
+                      f"(pid alive, queue bound: {bound})")
 
     def update_compression_state(self, state_value: int):
         """
-        Scrive il valore di stato (0-4) nel file letto dal compressore.
-        Chiamata dal controller tick ad ogni transizione di stato.
+        Writes the state value (0-4) to the file read by the compressor.
+        Called by the controller tick at every state transition.
         """
         self.sh(self.topo.bottleneck_node,
                 f"echo {state_value} > {COMP_STATE_FILE}")
 
     def nfqueue_stats(self) -> Optional[dict]:
-        """Legge /proc/net/netfilter/nfnetlink_queue per la coda NFQUEUE_NUM.
+        """Reads /proc/net/netfilter/nfnetlink_queue for the NFQUEUE_NUM queue.
 
-        Colonne: queue_num peer_portid queue_total copy_mode copy_range
+        Columns: queue_num peer_portid queue_total copy_mode copy_range
                  queue_dropped user_dropped id_sequence.
 
-        Diagnostica del middlebox (scenario 5 Fase 2, "run anomalo"):
-          * riga assente / peer_portid == 0  -> NESSUN consumatore bound
-            (--queue-bypass fa passare i pacchetti: fail-open).
-          * peer_portid != 0 + queue_dropped che cresce -> consumatore bound ma
-            STUCK: il kernel scarta i pacchetti a coda piena (black-hole). E' il
-            caso che --queue-bypass NON copre.
-        Ritorna None se la coda non e' bound.
+        Middlebox diagnostics (scenario 5 Phase 2, "anomalous run"):
+          * missing row / peer_portid == 0  -> NO consumer bound
+            (--queue-bypass lets the packets through: fail-open).
+          * peer_portid != 0 + queue_dropped growing -> consumer bound but
+            STUCK: the kernel drops the packets at a full queue (black-hole). This
+            is the case that --queue-bypass does NOT cover.
+        Returns None if the queue is not bound.
         """
         r = self.sh(self.topo.bottleneck_node,
                     "cat /proc/net/netfilter/nfnetlink_queue 2>/dev/null || true")
@@ -571,9 +570,9 @@ class Net:
         return None
 
     def compressor_stats(self) -> Optional[dict]:
-        """Legge i contatori scritti da eds_compressor.py in COMP_STATS_FILE:
-        pkts (processati) bytes_in bytes_out compressed. Ratio reale sul filo =
-        bytes_in/bytes_out. Ritorna None se il file non c'e'."""
+        """Reads the counters written by eds_compressor.py in COMP_STATS_FILE:
+        pkts (processed) bytes_in bytes_out compressed. Real on-the-wire ratio =
+        bytes_in/bytes_out. Returns None if the file is not there."""
         r = self.sh(self.topo.bottleneck_node,
                     f"cat {COMP_STATS_FILE} 2>/dev/null || true")
         parts = (r.stdout or "").split()
@@ -586,12 +585,12 @@ class Net:
             return None
 
     def nfqueue_rule_matched(self) -> Optional[int]:
-        """Pacchetti che hanno fatto match sulla regola NFQUEUE (contatore
-        iptables). Confrontato con compressor_stats()['pkts'] misura il BYPASS:
-        matched - processati = pacchetti passati non compressi (--queue-bypass).
+        """Packets that matched the NFQUEUE rule (iptables counter). Compared with
+        compressor_stats()['pkts'] it measures the BYPASS: matched - processed =
+        packets passed through uncompressed (--queue-bypass).
 
-        Somma su FORWARD e OUTPUT: sul single_bottleneck il match e' su FORWARD
-        (nodo che inoltra), su multi_hop/mesh su OUTPUT (nodo che origina)."""
+        Sums over FORWARD and OUTPUT: on single_bottleneck the match is on FORWARD
+        (forwarding node), on multi_hop/mesh on OUTPUT (originating node)."""
         total = None
         for chain in ("FORWARD", "OUTPUT"):
             r = self.sh(self.topo.bottleneck_node,
@@ -600,11 +599,11 @@ class Net:
                 if f"NFQUEUE num {NFQUEUE_NUM}" in line:
                     f = line.split()
                     if len(f) >= 1 and f[0].isdigit():
-                        total = (total or 0) + int(f[0])   # colonna 'pkts'
+                        total = (total or 0) + int(f[0])   # 'pkts' column
         return total
 
     def stop_compressor(self):
-        """Rimuove la regola iptables (match esatto) e termina il compressore."""
+        """Removes the iptables rule (exact match) and stops the compressor."""
         node = self.topo.bottleneck_node
         for rule in self._comp_rules:
             self.sh(node, f"iptables -D {rule} 2>/dev/null || true")
@@ -612,10 +611,10 @@ class Net:
                 "pid=$(cat /tmp/eds_comp.pid 2>/dev/null); "
                 "[ -n \"$pid\" ] && kill $pid 2>/dev/null || true")
         if self.verbose:
-            print("      [compressor] fermato, regola iptables rimossa")
+            print("      [compressor] stopped, iptables rule removed")
 
     def apply_drop_low_priority(self, active: bool):
-        """Aggiunge/rimuove i filtri tc che scartano il traffico a bassa priorita'."""
+        """Adds/removes the tc filters that drop the low-priority traffic."""
         node, iface = self.topo.bottleneck_node, self.topo.bottleneck_if
         if active and not self._drop_active:
             for tos in LOW_PRIORITY_TOS:
@@ -623,15 +622,15 @@ class Net:
                               f"u32 match ip tos {hex(tos)} 0xfc action drop")
             self._drop_active = True
             if self.verbose:
-                print("      [state] DROP_LOW_PRIORITY attivo (scarto priorita' > 0)")
+                print("      [state] DROP_LOW_PRIORITY active (dropping priority > 0)")
         elif not active and self._drop_active:
             self.sh(node, f"tc filter del dev {iface} parent 1: prio 5")
             self._drop_active = False
             if self.verbose:
-                print("      [state] DROP_LOW_PRIORITY disattivato")
+                print("      [state] DROP_LOW_PRIORITY disabled")
 
 
-# ------------------------- Scheduler real-time ------------------------------
+# ------------------------- Real-time scheduler ------------------------------
 @dataclass(order=True)
 class _SchedItem:
     t: float
@@ -641,7 +640,7 @@ class _SchedItem:
 
 
 class RTScheduler:
-    """Heap di eventi ordinati per tempo, eseguiti sul wall-clock reale."""
+    """Heap of events ordered by time, executed on the real wall-clock."""
 
     def __init__(self):
         self._q: list[_SchedItem] = []
@@ -666,20 +665,20 @@ class RTScheduler:
                 time.sleep(delay)
             try:
                 item.fn(*item.args)
-            except Exception as e:  # noqa: BLE001 - un evento non deve fermare il run
-                print(f"      [scheduler] errore evento: {e}")
+            except Exception as e:  # noqa: BLE001 - an event must not stop the run
+                print(f"      [scheduler] event error: {e}")
 
 
-# --------------------------------- Flussi -----------------------------------
+# --------------------------------- Flows ------------------------------------
 @dataclass
 class FlowSpec:
     fid: int
-    src: str                 # nodo sorgente
+    src: str                 # source node
     model: FlowModel
-    mbit: float              # banda obiettivo (== rate pkt/s del simulatore)
+    mbit: float              # target bandwidth (== simulator pkt/s rate)
     tclass: tuple            # (size_lo, size_hi, priority, tos)
     start: float = 0.0
-    stop: Optional[float] = None   # None => fino a fine simulazione
+    stop: Optional[float] = None   # None => until end of simulation
 
     def pps(self) -> float:
         lo, hi, _pri, _tos = self.tclass
@@ -689,28 +688,28 @@ class FlowSpec:
 
 # --------------------------- Metrics Engine ---------------------------------
 class Metrics:
-    """Equivalente di simulator/metrics.py, ma su misure reali."""
+    """Equivalent of simulator/metrics.py, but on real measurements."""
 
     def __init__(self):
         self.samples = []          # (t, occupancy, state, throughput_pps)
         self.transitions = 0
-        # tracking tempo per stato (Fase 2: stima compression_ratio)
+        # time-per-state tracking (Phase 2: compression_ratio estimate)
         self._state_time: dict[str, float] = {s.name: 0.0 for s in CongestionState}
         self._state_enter_t: float = 0.0
         self._last_state: str = CongestionState.NORMAL.name
 
     def record_state_time(self, new_state_name: str, now: float) -> None:
-        """Chiude il timer dello stato precedente, apre quello del nuovo."""
+        """Closes the timer of the previous state, opens the one of the new state."""
         self._state_time[self._last_state] += now - self._state_enter_t
         self._state_enter_t = now
         self._last_state = new_state_name
 
     def close_state_time(self, end_t: float) -> None:
-        """Chiude il timer dello stato corrente alla fine della simulazione."""
+        """Closes the timer of the current state at the end of the simulation."""
         self._state_time[self._last_state] += end_t - self._state_enter_t
 
     def compression_ratio(self) -> float:
-        """Stima il compression_ratio come media pesata sul tempo per stato."""
+        """Estimates the compression_ratio as a weighted average over time per state."""
         total = sum(self._state_time.values())
         if total <= 0.0:
             return 1.0
@@ -729,17 +728,17 @@ class Metrics:
         return (s * s) / (n * s2) if s2 > 0 else 1.0
 
 
-# ------------------------ Osservazione per l'Actor MAPPO --------------------
+# ------------------------ Observation for the MAPPO Actor -------------------
 def _offered_priority_ratios(flows: list[FlowSpec], t: float,
                              end_time: float) -> tuple:
     """
-    Stima hi_pri_ratio / lo_pri_ratio dal mix di traffico OFFERTO ai tempo t.
+    Estimates hi_pri_ratio / lo_pri_ratio from the OFFERED traffic mix at time t.
 
-    Nel simulatore queste feature (doc Tabella 7) sono la frazione di pacchetti
-    CONTROL / VIDEO nella coda; sull'emulatore la composizione della coda non e'
-    ispezionabile via `tc`, quindi la si approssima con la frazione di pkt/s
-    offerti per priorita' dai flussi attivi. E' l'unico punto di scarto
-    sim-to-real dell'osservazione (documentato nel README).
+    In the simulator these features (doc Table 7) are the fraction of CONTROL /
+    VIDEO packets in the queue; on the emulator the queue composition is not
+    inspectable via `tc`, so it is approximated with the fraction of pkt/s offered
+    per priority by the active flows. It is the only sim-to-real gap point of the
+    observation (documented in the README).
     """
     hi = lo = tot = 0.0
     for fs in flows:
@@ -766,35 +765,35 @@ def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
                   mappo_ckpt: Optional[str] = None,
                   mappo_trace_path: Optional[str] = None) -> dict:
     """
-    Esegue uno scenario completo:
-      - avvia il ricevitore sul nodo destinazione,
-      - schedula flussi (FLOW_START/STOP), eventi di rete e i campioni METRIC_SAMPLE,
-      - fa girare il controller della congestion state machine in tempo reale,
-      - raccoglie e stampa le metriche finali.
+    Runs a complete scenario:
+      - starts the receiver on the destination node,
+      - schedules flows (FLOW_START/STOP), network events and METRIC_SAMPLE samples,
+      - runs the congestion state machine controller in real time,
+      - collects and prints the final metrics.
     """
     topo = TOPOS[topo_key]
     if queue_limit is not None:
         topo = replace(topo, queue_limit=queue_limit)
-    # Topologie a percorso unico (multi_hop, mesh): rimappa ogni sorgente sul nodo
-    # d'ingresso, cosi' gli stessi scenari canonici (src0/src1/src2) girano tali e
-    # quali facendo entrare tutti i flussi dal primo hop verso topo.dst_node.
+    # Single-path topologies (multi_hop, mesh): remap every source onto the entry
+    # node, so the same canonical scenarios (src0/src1/src2) run as-is by making
+    # all flows enter at the first hop towards topo.dst_node.
     if topo.entry_node is not None:
         flows = [replace(f, src=topo.entry_node) for f in flows]
     net = Net(topo)
     print("=" * 70)
     if title:
         print(f"  {title}")
-    print(f"  Topologia: {topo_key}   destinazione: {topo.dst_node} ({topo.dst_ip})")
+    print(f"  Topology: {topo_key}   destination: {topo.dst_node} ({topo.dst_ip})")
     print("=" * 70)
     net.preflight()
     net.cleanup_stale(port=port)
-    # Applica sempre (ri)configurazione della netem del collo di bottiglia col
-    # ritardo scelto (default 5ms = deploy.sh). Con EDS_BOTTLENECK_DELAY basso il
-    # buffer torna drop-tail puro e la compressione torna efficace (vedi costante).
+    # Always (re)apply the netem configuration of the bottleneck with the chosen
+    # delay (default 5ms = deploy.sh). With a low EDS_BOTTLENECK_DELAY the buffer
+    # goes back to pure drop-tail and compression becomes effective again (see constant).
     net.set_queue_limit(topo.queue_limit, delay=BOTTLENECK_DELAY)
-    _blm = ("byte-limited (drop-tail puro)"
+    _blm = ("byte-limited (pure drop-tail)"
             if BOTTLENECK_DELAY in ("0ms", "0", "0.0ms") else "packet-limited")
-    print(f"  collo di bottiglia: tbf + netem delay {BOTTLENECK_DELAY} limit "
+    print(f"  bottleneck: tbf + netem delay {BOTTLENECK_DELAY} limit "
           f"{topo.queue_limit}  [{_blm}]  (EDS_BOTTLENECK_DELAY)")
 
     mappo_mode = mappo_ckpt is not None
@@ -802,57 +801,57 @@ def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
     min_state_dwell = 0.0
     mappo_trace_rows = []
     if mappo_mode:
-        from eds_actor import Actor as MappoActor  # import pigro (solo se serve)
+        from eds_actor import Actor as MappoActor  # lazy import (only if needed)
         actor = MappoActor.from_checkpoint(mappo_ckpt)
         min_state_dwell = float(getattr(actor, "meta", {}).get(
             "min_state_dwell", 0.0))
-        # override per gli esperimenti sui knob di deploy (senza ri-esportare il ckpt)
+        # override for the deploy-knob experiments (without re-exporting the ckpt)
         if os.environ.get("EDS_MAPPO_DWELL") is not None:
             min_state_dwell = float(os.environ["EDS_MAPPO_DWELL"])
 
-    # La Fase 2 e la Fase 3 usano la stessa infrastruttura di compressione
-    # (middlebox NFQUEUE): cambia solo CHI decide lo stato. In Fase 3 e' l'Actor.
+    # Phase 2 and Phase 3 use the same compression infrastructure (NFQUEUE
+    # middlebox): only WHO decides the state changes. In Phase 3 it is the Actor.
     if enable_phase2 or mappo_mode:
         net.install_compressor_deps()
         net.start_compressor(port=port)
         classes = "VIDEO" if NFQUEUE_MINLEN > 328 else "VIDEO+TELEMETRY"
-        print(f"  compressore NFQUEUE: soglia min {NFQUEUE_MINLEN}B -> comprime "
-              f"{classes}  (EDS_NFQUEUE_MINLEN per cambiarla)")
+        print(f"  NFQUEUE compressor: min threshold {NFQUEUE_MINLEN}B -> compresses "
+              f"{classes}  (EDS_NFQUEUE_MINLEN to change it)")
 
     if mappo_mode:
-        # macchina di stato PASSIVA: aggiorna solo l'EWMA, non transisce da sola;
-        # le transizioni le decide la policy (come AgentControlledStateMachine).
+        # PASSIVE state machine: only updates the EWMA, does not transition on its
+        # own; the transitions are decided by the policy (like AgentControlledStateMachine).
         sm = CongestionStateMachine(ewma_alpha=PHASE2_EWMA_ALPHA)
         meta = getattr(actor, "meta", {})
-        print(f"  Modalità: FASE 3  (MAPPO — policy appresa pilota la macchina di stato)")
+        print(f"  Mode: PHASE 3  (MAPPO — the learned policy drives the state machine)")
         print(f"  checkpoint: {os.path.basename(mappo_ckpt)}  "
-              f"(episodio {meta.get('episode','?')}, "
+              f"(episode {meta.get('episode','?')}, "
               f"λ_stab={meta.get('stability_penalty', 0.0)}, "
               f"dwell={min_state_dwell:.1f}s)")
         if MAPPO_COMPRESSION_GATE:
-            print(f"  guardrail compressione: ATTIVO (opt-in)  (ESCALATE solo se "
-                  f"drop_rate>{MAPPO_GATE_DROP_RATE:.0%} o occ>="
-                  f"{MAPPO_EMERGENCY_OCCUPANCY:.0%}; per i checkpoint legacy)")
+            print(f"  compression guardrail: ACTIVE (opt-in)  (ESCALATE only if "
+                  f"drop_rate>{MAPPO_GATE_DROP_RATE:.0%} or occ>="
+                  f"{MAPPO_EMERGENCY_OCCUPANCY:.0%}; for the legacy checkpoints)")
         else:
-            print("  guardrail compressione: DISATTIVO (default)  (policy pura; "
-                  "EDS_MAPPO_GATE=1 per riattivarlo sui checkpoint legacy)")
+            print("  compression guardrail: OFF (default)  (pure policy; "
+                  "EDS_MAPPO_GATE=1 to re-enable it on the legacy checkpoints)")
     elif enable_phase2:
         sm = CongestionStateMachine(
             ewma_alpha=PHASE2_EWMA_ALPHA,
             escalation_debounce=PHASE2_ESCALATION_DEBOUNCE,
             deescalation_cooldown=PHASE2_DEESCALATION_COOLDOWN,
         )
-        print(f"  Modalità: FASE 2  (EWMA α={PHASE2_EWMA_ALPHA}, "
+        print(f"  Mode: PHASE 2  (EWMA α={PHASE2_EWMA_ALPHA}, "
               f"escalation={PHASE2_ESCALATION_DEBOUNCE}s, "
               f"cooldown={PHASE2_DEESCALATION_COOLDOWN}s)")
     else:
         sm = CongestionStateMachine()
-        print("  Modalità: FASE 1  (transizioni istantanee)")
+        print("  Mode: PHASE 1  (instantaneous transitions)")
     metrics = Metrics()
     results = {"send": [], "recv": None}
     threads: list[threading.Thread] = []
 
-    # --- ricevitore --------------------------------------------------------
+    # --- receiver ----------------------------------------------------------
     def _recv_worker():
         cmd = ["docker", "exec",
                "-e", f"EDS_PORT={port}",
@@ -868,9 +867,9 @@ def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
     rt = threading.Thread(target=_recv_worker, daemon=True)
     rt.start()
     threads.append(rt)
-    time.sleep(1.0)  # lascia salire il ricevitore
+    time.sleep(1.0)  # let the receiver come up
 
-    # --- sender per flusso -------------------------------------------------
+    # --- sender per flow ---------------------------------------------------
     def _send_worker(fs: FlowSpec, duration: float):
         lo, hi, _pri, tos = fs.tclass
         cmd = ["docker", "exec",
@@ -904,7 +903,7 @@ def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
         th.start()
         threads.append(th)
 
-    # --- controller Fase 1/2 (macchina di stato automatica) ----------------
+    # --- Phase 1/2 controller (automatic state machine) --------------------
     def _controller_tick(sched: RTScheduler):
         now = sched.now()
         st = net.qdisc_stats()
@@ -912,7 +911,7 @@ def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
         if changed:
             metrics.transitions += 1
             metrics.record_state_time(sm.current_state.name, now)
-            print(f"  [t={now:5.1f}] STATO -> {sm.current_state.name}  "
+            print(f"  [t={now:5.1f}] STATE -> {sm.current_state.name}  "
                   f"(EWMA occ={sm.ewma_occupancy*100:.1f}%)")
             if enable_phase2:
                 net.update_compression_state(sm.current_state.value)
@@ -921,7 +920,7 @@ def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
         if nt <= end_time:
             sched.at(nt, _controller_tick, sched)
 
-    # --- controller Fase 3 (policy MAPPO pilota la macchina di stato) -------
+    # --- Phase 3 controller (the MAPPO policy drives the state machine) -----
     mstate = {"sent_bytes": 0, "sent_pkts": 0, "dropped": 0, "t": 0.0,
               "last_transition": 0.0, "cap_bps": MAPPO_CAP_BPS, "ewma": 0.0}
 
@@ -937,12 +936,12 @@ def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
         mstate["dropped"] = st["dropped"]
         mstate["t"] = now
 
-        # EWMA dell'occupancy (α = Fase 2), aggiornata a mano: la macchina resta passiva
+        # EWMA of the occupancy (α = Phase 2), updated by hand: the machine stays passive
         mstate["ewma"] = ((1.0 - PHASE2_EWMA_ALPHA) * mstate["ewma"]
                           + PHASE2_EWMA_ALPHA * st["occupancy"])
-        sm._ewma = mstate["ewma"]  # per il logging coerente
+        sm._ewma = mstate["ewma"]  # for consistent logging
 
-        # drop_rate = frazione di arrivi scartati nella finestra (proxy di deltas["drop"]/gen)
+        # drop_rate = fraction of arrivals dropped in the window (proxy of deltas["drop"]/gen)
         arrived = d_sent + d_drop
         drop_rate = d_drop / arrived if arrived > 0 else 0.0
         link_util = min(d_bytes * 8.0 / (mstate["cap_bps"] * dt), 1.0)
@@ -951,12 +950,12 @@ def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
 
         obs = [
             min(max(mstate["ewma"], 0.0), 1.0),      # ewma_occ
-            sm.current_state.value / 4.0,            # stato / 4
-            hi,                                      # hi_pri_ratio (offerto)
-            lo,                                      # lo_pri_ratio (offerto)
-            min(max(drop_rate, 0.0), 1.0),           # drop rate finestra
-            link_util,                               # utilizzo link
-            t_in_state,                              # t_stato / T_max
+            sm.current_state.value / 4.0,            # state / 4
+            hi,                                      # hi_pri_ratio (offered)
+            lo,                                      # lo_pri_ratio (offered)
+            min(max(drop_rate, 0.0), 1.0),           # window drop rate
+            link_util,                               # link utilization
+            t_in_state,                              # t_state / T_max
         ]
         action_mask = mappo_action_mask(
             now, mstate["last_transition"], min_state_dwell, st["occupancy"],
@@ -1007,19 +1006,19 @@ def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
         state_prev["sent"] = st["sent_pkts"]
         state_prev["t"] = t
         metrics.samples.append((t, st["occupancy"], sm.current_state.name, thr))
-        # drop relativi all'inizio della run (i contatori tc sono cumulativi dal deploy)
+        # drops relative to the start of the run (the tc counters are cumulative from deploy)
         drops_run = st["dropped"] - stats0["dropped"]
         print(f"  [t={t:5.1f}] METRIC  occ={st['occupancy']*100:5.1f}%  "
-              f"stato={sm.current_state.name:<22}  thr={max(thr,0.0):7.1f} pkt/s  "
+              f"state={sm.current_state.name:<22}  thr={max(thr,0.0):7.1f} pkt/s  "
               f"drop={drops_run}")
         nt = t + metric_interval
         if nt <= end_time + 1e-6:
             sched.at(nt, _metric_sample, sched)
 
-    # --- costruzione scheduler --------------------------------------------
+    # --- scheduler construction -------------------------------------------
     def _rate_change(mbit):
         net.set_bottleneck_rate(mbit)
-        mstate["cap_bps"] = mbit * 1e6   # tiene link_util coerente dopo un cambio banda
+        mstate["cap_bps"] = mbit * 1e6   # keeps link_util consistent after a bandwidth change
 
     sched = RTScheduler()
     for fs in flows:
@@ -1038,64 +1037,64 @@ def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
     sched.at(metric_interval, _metric_sample, sched)
 
     stats0 = net.qdisc_stats()
-    # allinea i riferimenti allo stato iniziale (contatori tc cumulativi dal deploy)
+    # align the references to the initial state (tc counters cumulative from deploy)
     state_prev["sent"] = stats0["sent_pkts"]
     mstate["sent_bytes"] = stats0["sent_bytes"]
     mstate["sent_pkts"] = stats0["sent_pkts"]
     mstate["dropped"] = stats0["dropped"]
-    metrics._state_enter_t = 0.0  # il run inizia a t=0
+    metrics._state_enter_t = 0.0  # the run starts at t=0
     sched.run(end_time)
 
-    # --- chiusura: attende sender/ricevitore -------------------------------
-    print("  ... attendo la chiusura di sender e ricevitore ...")
+    # --- closing: wait for sender/receiver ---------------------------------
+    print("  ... waiting for sender and receiver to close ...")
     for th in threads:
         th.join(timeout=40)
     if enable_phase2 or mappo_mode:
-        # Diagnostica middlebox PRIMA di fermarlo: cattura nel log del run se la
-        # coda NFQUEUE ha fatto black-hole (queue_dropped) o non era bound. E' la
-        # prova che conferma/smentisce il "run anomalo" dello scenario 5 Fase 2.
+        # Middlebox diagnostics BEFORE stopping it: capture in the run log whether
+        # the NFQUEUE queue black-holed (queue_dropped) or was not bound. It is the
+        # proof that confirms/refutes the "anomalous run" of scenario 5 Phase 2.
         nfq_end = net.nfqueue_stats()
         if nfq_end is None:
-            print("  [nfqueue] coda NON bound a fine run (nessun consumatore; "
-                  "--queue-bypass attivo, pacchetti passati non compressi).")
+            print("  [nfqueue] queue NOT bound at end of run (no consumer; "
+                  "--queue-bypass active, packets passed through uncompressed).")
         else:
             print(f"  [nfqueue] peer_portid={nfq_end['peer_portid']}  "
                   f"queue_total={nfq_end['queue_total']}  "
                   f"queue_dropped={nfq_end['queue_dropped']}  "
                   f"user_dropped={nfq_end['user_dropped']}")
             if nfq_end["queue_dropped"] > 0:
-                print("  [nfqueue] ATTENZIONE: queue_dropped>0 -> il compressore "
-                      "non ha retto il rate: pacchetti scartati dal kernel a coda "
-                      "piena (black-hole; --queue-bypass NON copre questo caso).")
-        # Compressione REALE sul filo + bypass: risponde a "perche' il PDR di
-        # scenario 1/5 non sale?". ratio_reale = bytes_in/bytes_out (deep vs no-op);
-        # bypass = pacchetti che hanno fatto match ma NON sono stati compressi
-        # (--queue-bypass sotto carico) = matched - processati.
+                print("  [nfqueue] WARNING: queue_dropped>0 -> the compressor did "
+                      "not keep up with the rate: packets dropped by the kernel at a "
+                      "full queue (black-hole; --queue-bypass does NOT cover this case).")
+        # REAL on-the-wire compression + bypass: answers "why does the PDR of
+        # scenario 1/5 not rise?". real_ratio = bytes_in/bytes_out (deep vs no-op);
+        # bypass = packets that matched but were NOT compressed
+        # (--queue-bypass under load) = matched - processed.
         cs = net.compressor_stats()
         matched = net.nfqueue_rule_matched()
         if cs is not None:
             ratio = (cs["bytes_in"] / cs["bytes_out"]) if cs["bytes_out"] else 1.0
             frac_c = (cs["compressed"] / cs["pkts"] * 100.0) if cs["pkts"] else 0.0
-            line = (f"  [compressor] processati={cs['pkts']}  ratio_reale_sul_filo="
-                    f"{ratio:.3f}x  troncati={frac_c:.0f}%")
+            line = (f"  [compressor] processed={cs['pkts']}  real_wire_ratio="
+                    f"{ratio:.3f}x  truncated={frac_c:.0f}%")
             if matched is not None:
                 bypass = max(matched - cs["pkts"], 0)
                 bp = (bypass / matched * 100.0) if matched else 0.0
                 line += f"  matched={matched}  bypass={bypass} ({bp:.0f}%)"
             print(line)
             if matched and (matched - cs["pkts"]) > 0.2 * matched:
-                print("  [compressor] NB: bypass elevato -> il compressore userspace "
-                      "non regge il rate; molti pacchetti passano NON compressi "
-                      "(spiega perche' la compressione non svuota la coda).")
+                print("  [compressor] NB: high bypass -> the userspace compressor "
+                      "does not keep up with the rate; many packets pass through "
+                      "UNCOMPRESSED (explains why compression does not empty the queue).")
             elif ratio < 1.05:
-                print("  [compressor] NB: ratio reale ~1.0 -> il controller NON sta "
-                      "raggiungendo/mantenendo uno stato di compressione profonda.")
+                print("  [compressor] NB: real ratio ~1.0 -> the controller is NOT "
+                      "reaching/holding a deep compression state.")
         log = net.sh(net.topo.bottleneck_node, "cat /tmp/eds_comp.log 2>/dev/null")
         tail = (log.stdout or "").strip().splitlines()[-5:]
         if tail:
             print("  [compressor:log] " + " | ".join(tail))
         net.stop_compressor()
-    net.apply_drop_low_priority(False)  # ripulisce i filtri tc
+    net.apply_drop_low_priority(False)  # cleans up the tc filters
     stats1 = net.qdisc_stats()
     metrics.close_state_time(end_time)
 
@@ -1110,22 +1109,21 @@ def run_emulation(topo_key: str, flows: list[FlowSpec], events: list[tuple],
                 "min_state_dwell": min_state_dwell,
                 "rows": mappo_trace_rows,
             }, fh, indent=2)
-        print(f"  traccia MAPPO salvata: {os.path.abspath(mappo_trace_path)}")
+        print(f"  MAPPO trace saved: {os.path.abspath(mappo_trace_path)}")
 
     summary = _summarize(topo, flows, results, metrics, stats0, stats1, end_time)
-    # Rilevamento "run anomalo": consegna quasi nulla (come lo scenario 5 Fase 2
-    # rep 1: throughput 0.06, 0 transizioni). Reso rumoroso nel log invece di
-    # sparire come un throughput ~0 medio nel benchmark.
+    # Detection of an "anomalous run": delivers almost nothing (like scenario 5
+    # Phase 2 rep 1: throughput 0.06, 0 transitions). Made noisy in the log instead
+    # of disappearing as a ~0 average throughput in the benchmark.
     if summary["generated"] > 100 and summary["packet_delivery_ratio"] < 0.1:
         print("  " + "!" * 66)
-        print(f"  RUN ANOMALO: consegnato solo "
-              f"{summary['packet_delivery_ratio']*100:.1f}% dei pacchetti generati.")
+        print(f"  ANOMALOUS RUN: delivered only "
+              f"{summary['packet_delivery_ratio']*100:.1f}% of the generated packets.")
         if enable_phase2 or mappo_mode:
-            print("  Sospetto principale: middlebox NFQUEUE (compressore stuck o "
-                  "morto). Vedi [nfqueue] e [compressor:log] qui sopra.")
+            print("  Main suspect: NFQUEUE middlebox (compressor stuck or dead). "
+                  "See [nfqueue] and [compressor:log] above.")
         else:
-            print("  Sospetto principale: ricevitore o forwarding (nessun "
-                  "middlebox in questa modalita').")
+            print("  Main suspect: receiver or forwarding (no middlebox in this mode).")
         print("  " + "!" * 66)
     return summary
 
@@ -1162,24 +1160,24 @@ def _summarize(topo, flows, results, metrics, stats0, stats1, end_time) -> dict:
     occ_avg = (sum(s[1] for s in metrics.samples) / len(metrics.samples)
                if metrics.samples else 0.0)
 
-    # Compression ratio reale da byte misurati.
-    # avg_orig_size = dimensione originale media per pacchetto (lato sender, pre-compressione).
-    # bytes_total = byte effettivamente ricevuti (post-compressione sul link bottleneck).
-    # ratio = (orig_per_pkt × pkt_consegnati) / byte_ricevuti  →  > 1.0 se compressione attiva.
+    # Real compression ratio from measured bytes.
+    # avg_orig_size = average original size per packet (sender side, pre-compression).
+    # bytes_total = bytes actually received (post-compression on the bottleneck link).
+    # ratio = (orig_per_pkt × delivered_pkt) / received_bytes  →  > 1.0 if compression active.
     avg_orig_size = bytes_sent_total / sent_total if sent_total else 0.0
     if bytes_total > 0 and avg_orig_size > 0:
         real_compression_ratio = (avg_orig_size * recv_total) / bytes_total
     else:
         real_compression_ratio = metrics.compression_ratio()
 
-    # fairness (Jain) sul throughput per-flusso
+    # fairness (Jain) on the per-flow throughput
     per_flow_thr = {str(fid): 0 for fid in (f.fid for f in flows)}
     for fid_str, f in recv_flows.items():
         per_flow_thr[str(fid_str)] = f.get("recv", 0)
     fairness = metrics.jain(list(per_flow_thr.values()))
 
-    # KPI per classe, ricavati dagli identificativi di flusso presenti sia nel
-    # report sender sia nel report receiver. Non dipendono dai contatori tc.
+    # Per-class KPIs, derived from the flow identifiers present both in the sender
+    # report and in the receiver report. They do not depend on the tc counters.
     class_names = {0: "CONTROL", 1: "TELEMETRY", 2: "VIDEO"}
     flow_priority = {str(f.fid): f.tclass[2] for f in flows}
     class_metrics = {
@@ -1217,24 +1215,24 @@ def _summarize(topo, flows, results, metrics, stats0, stats1, end_time) -> dict:
     }
 
     print("-" * 70)
-    print("  RISULTATI (Metrics Engine)")
+    print("  RESULTS (Metrics Engine)")
     print("-" * 70)
-    print(f"  Pacchetti generati .............. {summary['generated']}")
-    print(f"  Pacchetti consegnati ............ {summary['delivered']}")
-    print(f"  Packet Delivery Ratio ........... {summary['packet_delivery_ratio']*100:.2f}%")
-    print(f"  Throughput ...................... {summary['throughput_pps']:.1f} pkt/s "
+    print(f"  Packets generated .............. {summary['generated']}")
+    print(f"  Packets delivered .............. {summary['delivered']}")
+    print(f"  Packet Delivery Ratio .......... {summary['packet_delivery_ratio']*100:.2f}%")
+    print(f"  Throughput ..................... {summary['throughput_pps']:.1f} pkt/s "
           f"({summary['throughput_mbps']:.3f} Mbit/s)")
-    print(f"  Latenza end-to-end .............. {summary['end_to_end_latency_ms']:.2f} ms")
-    print(f"  Occupancy media coda ............ {summary['avg_queue_occupancy']*100:.1f}%")
-    print(f"  Drop coda netem (non duplicati) . {summary['drop_count']}")
-    print(f"  Perdite end-to-end .............. {summary['endpoint_loss_count']}")
-    print(f"  Transizioni stato congestione ... {summary['congestion_state_transitions']}")
-    print(f"  Fairness (Jain) ................. {summary['fairness_jain']:.3f}")
-    print(f"  Compression ratio (reale, byte) . {summary['compression_ratio']:.3f}x")
+    print(f"  End-to-end latency ............. {summary['end_to_end_latency_ms']:.2f} ms")
+    print(f"  Avg queue occupancy ............ {summary['avg_queue_occupancy']*100:.1f}%")
+    print(f"  Netem queue drops (non-dup.) ... {summary['drop_count']}")
+    print(f"  End-to-end losses .............. {summary['endpoint_loss_count']}")
+    print(f"  Congestion state transitions ... {summary['congestion_state_transitions']}")
+    print(f"  Fairness (Jain) ................ {summary['fairness_jain']:.3f}")
+    print(f"  Compression ratio (real, bytes)  {summary['compression_ratio']:.3f}x")
     st_line = "  ".join(f"{k[:4]}={v:.1f}s" for k, v in summary["state_time_s"].items() if v > 0)
     if st_line:
-        print(f"  Tempo per stato ................. {st_line}")
-    print("  PDR per classe:")
+        print(f"  Time per state ................. {st_line}")
+    print("  PDR per class:")
     for name, values in summary["class_metrics"].items():
         if values["generated"]:
             print(f"    {name:<10} {values['pdr']*100:6.2f}%  "

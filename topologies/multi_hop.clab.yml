@@ -1,12 +1,12 @@
 # multi_hop.clab.yml
 #
-# Topologia "multi hop" del progetto Event-Driven Simulator.
-# Riproduce NetworkTopology.multi_hop() (n_hops=3): catena lineare di 4 nodi.
+# "multi hop" topology of the Event-Driven Simulator project.
+# Reproduces NetworkTopology.multi_hop() (n_hops=3): a linear chain of 4 nodes.
 #
 #   n0 ══(10 Mbps)══ n1 ══(10 Mbps)══ n2 ══(10 Mbps)══ n3
 #
-# Ogni link è da 10 Mbps (sim: capacity=10). I nodi intermedi n1 e n2
-# inoltrano i pacchetti. Indirizzi, routing e shaping sono applicati da
+# Every link is 10 Mbps (sim: capacity=10). The intermediate nodes n1 and n2
+# forward the packets. Addresses, routing and shaping are applied by
 # ../deploy.sh.
 name: multi-hop
 
@@ -14,7 +14,7 @@ topology:
   defaults:
     kind: linux
     binds:
-      # agente dell'emulatore (traffic generator UDP) disponibile in /opt/eds
+      # emulator agent (UDP traffic generator) available at /opt/eds
       - ../agent:/opt/eds:ro
   kinds:
     linux:

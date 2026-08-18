@@ -1,23 +1,23 @@
 # single_bottleneck.clab.yml
 #
-# Topologia "single bottleneck" del progetto Event-Driven Simulator.
-# Riproduce NetworkTopology.single_bottleneck() con 3 sorgenti (usate dagli
-# scenari 5 e 6 di examples/scenarios.py):
+# "single bottleneck" topology of the Event-Driven Simulator project.
+# Reproduces NetworkTopology.single_bottleneck() with 3 sources (used by
+# scenarios 5 and 6 of examples/scenarios.py):
 #
 #   src0 ──┐
-#   src1 ──┼── router ════(collo di bottiglia 10 Mbps)════ dst
+#   src1 ──┼── router ════(bottleneck 10 Mbps)════ dst
 #   src2 ──┘
 #
-# I link di accesso src*->router sono ad alta capacità (sim: capacity=1000),
-# il link router->dst è il collo di bottiglia (sim: capacity=10, queue_size=20).
-# Indirizzi, routing e shaping (tc) sono applicati da ../deploy.sh.
+# The access links src*->router are high-capacity (sim: capacity=1000),
+# the router->dst link is the bottleneck (sim: capacity=10, queue_size=20).
+# Addresses, routing and shaping (tc) are applied by ../deploy.sh.
 name: single-bottleneck
 
 topology:
   defaults:
     kind: linux
     binds:
-      # agente dell'emulatore (traffic generator UDP) disponibile in /opt/eds
+      # emulator agent (UDP traffic generator) available at /opt/eds
       - ../agent:/opt/eds:ro
   kinds:
     linux:
@@ -29,9 +29,9 @@ topology:
     router: {}
     dst: {}
   links:
-    # link di accesso ad alta capacità
+    # high-capacity access links
     - endpoints: ["src0:eth1", "router:eth1"]
     - endpoints: ["src1:eth1", "router:eth2"]
     - endpoints: ["src2:eth1", "router:eth3"]
-    # collo di bottiglia
+    # bottleneck
     - endpoints: ["router:eth4", "dst:eth1"]

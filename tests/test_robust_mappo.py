@@ -10,8 +10,8 @@ import eds_emulator  # noqa: E402
 from eds_actor import Actor, ESCALATE, MAINTAIN  # noqa: E402
 from eds_emulator import mappo_action_mask, parse_qdisc_stats  # noqa: E402
 
-# Pressione di perdita oltre soglia: isola i test del dwell dal guardrail
-# anti-compressione (che altrimenti bloccherebbe l'ESCALATE a drop_rate=0).
+# Loss pressure above threshold: isolates the dwell tests from the anti-empty
+# compression guardrail (which would otherwise block ESCALATE at drop_rate=0).
 _LOSS = eds_emulator.MAPPO_GATE_DROP_RATE + 0.1
 
 
@@ -40,13 +40,13 @@ class TestRobustMappoDeploy(unittest.TestCase):
                          [True, True, False])
 
     def test_all_actions_after_dwell(self):
-        # Dwell soddisfatto e pressione di perdita presente: tutto permesso.
+        # Dwell satisfied and loss pressure present: everything allowed.
         self.assertEqual(mappo_action_mask(3.0, 0.0, 3.0, 1.0, drop_rate=_LOSS),
                          [True, True, True])
 
     def test_old_checkpoint_semantics_have_no_dwell(self):
-        # min_state_dwell=0 -> il dwell non congela nulla. Passo pressione di
-        # perdita per isolare questo dal guardrail (testato separatamente sotto).
+        # min_state_dwell=0 -> the dwell freezes nothing. Pass loss pressure to
+        # isolate this from the guardrail (tested separately below).
         self.assertEqual(mappo_action_mask(0.1, 0.0, 0.0, 0.20, drop_rate=_LOSS),
                          [True, True, True])
 
@@ -67,11 +67,11 @@ qdisc netem 10: parent 1:1 limit 40 delay 5ms
 
 
 class TestCompressionGuardrail(unittest.TestCase):
-    """Guardrail anti-compressione-a-vuoto: ESCALATE solo sotto pressione.
+    """Anti-empty-compression guardrail: ESCALATE only under pressure.
 
-    Il guardrail e' ora OPT-IN (default OFF, la reward gated lo rende superfluo):
-    questi test ne verificano il comportamento QUANDO attivo, quindi lo abilitano
-    esplicitamente in setUp."""
+    The guardrail is now OPT-IN (default OFF, the gated reward makes it
+    superfluous): these tests verify its behavior WHEN active, so they enable it
+    explicitly in setUp."""
 
     def setUp(self):
         self._gate = eds_emulator.MAPPO_COMPRESSION_GATE
@@ -81,23 +81,23 @@ class TestCompressionGuardrail(unittest.TestCase):
         eds_emulator.MAPPO_COMPRESSION_GATE = self._gate
 
     def test_blocks_escalation_without_loss(self):
-        # Scenario 2: dwell soddisfatto, coda occupata ma senza drop -> niente
-        # compressione (solo MAINTAIN/DEESCALATE consentiti).
+        # Scenario 2: dwell satisfied, queue busy but with no drop -> no
+        # compression (only MAINTAIN/DEESCALATE allowed).
         self.assertEqual(mappo_action_mask(3.0, 0.0, 3.0, 0.65, drop_rate=0.0),
                          [False, True, True])
 
     def test_allows_escalation_under_loss(self):
-        # Scenario 1/5: perdita reale -> ESCALATE consentito.
+        # Scenario 1/5: real loss -> ESCALATE allowed.
         self.assertEqual(mappo_action_mask(3.0, 0.0, 3.0, 0.65, drop_rate=0.2),
                          [True, True, True])
 
     def test_allows_escalation_on_emergency_occupancy(self):
-        # Coda quasi piena (>=95%) anche senza drop ancora contati -> consentito.
+        # Queue almost full (>=95%) even without drops counted yet -> allowed.
         self.assertEqual(mappo_action_mask(3.0, 0.0, 3.0, 0.96, drop_rate=0.0),
                          [True, True, True])
 
     def test_gate_can_be_disabled(self):
-        # EDS_MAPPO_GATE=0: comportamento robusto originale (tutto permesso).
+        # EDS_MAPPO_GATE=0: original robust behavior (everything allowed).
         original = eds_emulator.MAPPO_COMPRESSION_GATE
         eds_emulator.MAPPO_COMPRESSION_GATE = False
         try:

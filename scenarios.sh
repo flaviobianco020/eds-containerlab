@@ -1,47 +1,47 @@
 #!/usr/bin/env bash
 #
-# scenarios.sh - Riproduce i 6 scenari di congestione di examples/scenarios.py
-#                del simulatore Event-Driven Simulator, sulla topologia
-#                single_bottleneck (3 sorgenti).
+# scenarios.sh - Reproduces the 6 congestion scenarios of examples/scenarios.py
+#                from the Event-Driven Simulator, on the single_bottleneck
+#                topology (3 sources).
 #
-# Prerequisito:
+# Prerequisite:
 #   ./deploy.sh single_bottleneck
 #
-# Uso:
+# Usage:
 #   ./scenarios.sh <1-6>
 #
-#   1  single_bottleneck     - overload di base (load 13 > cap 10), la coda si
-#                              riempie e iniziano i drop
-#   2  flash_crowd           - flusso "surge" extra da t=20 a t=50
-#   3  bandwidth_degradation - banda del collo di bottiglia 10->4 a t=30, 10 a t=60
-#   4  link_failure_recovery - link router->dst giù a t=30, su a t=55
-#   5  persistent_overload   - overload sostenuto per tutta la durata (load 15)
-#   6  mixed_telemetry_video - 3 classi (control/telemetry/video) con priorità
-#                              (HTB + filtri DSCP): il control resta protetto
+#   1  single_bottleneck     - basic overload (load 13 > cap 10), the queue
+#                              fills up and drops begin
+#   2  flash_crowd           - extra "surge" flow from t=20 to t=50
+#   3  bandwidth_degradation - bottleneck bandwidth 10->4 at t=30, 10 at t=60
+#   4  link_failure_recovery - router->dst link down at t=30, up at t=55
+#   5  persistent_overload   - sustained overload for the whole run (load 15)
+#   6  mixed_telemetry_video - 3 classes (control/telemetry/video) with priority
+#                              (HTB + DSCP filters): control stays protected
 #
-# Gli scenari usano traffico UDP (iperf3 -u) così i drop dovuti alla coda piena
-# sono visibili nel report (datagrammi persi), come il drop_count del simulatore.
+# The scenarios use UDP traffic (iperf3 -u) so drops caused by the full queue
+# are visible in the report (lost datagrams), like the simulator's drop_count.
 #
 set -euo pipefail
 
 LAB="single-bottleneck"
 DST=10.0.30.1
-BNECK_IF=eth4          # interfaccia del collo di bottiglia su 'router'
+BNECK_IF=eth4          # bottleneck interface on 'router'
 SCN="${1:-}"
 
 cexec()    { local n="$1"; shift; docker exec "clab-${LAB}-${n}" sh -c "$*"; }
 cexec_bg() { local n="$1"; shift; docker exec -d "clab-${LAB}-${n}" sh -c "$*"; }
 
-# server iperf3 UDP (uno per porta), -1 = si chiude dopo un test
+# UDP iperf3 server (one per port), -1 = closes after a single test
 srv() { cexec_bg dst "iperf3 -s -1 -p $1"; }
 
-# Cambia la banda del collo di bottiglia a runtime (mantiene il netem figlio).
+# Change the bottleneck bandwidth at runtime (keeps the netem child).
 set_bottleneck_rate() {
-  echo "   [t=$(date +%s)] banda collo di bottiglia -> $1"
+  echo "   [t=$(date +%s)] bottleneck bandwidth -> $1"
   cexec router "tc qdisc change dev $BNECK_IF root handle 1: tbf rate $1 burst 1mbit limit 1m"
 }
-link_down() { echo "   [evento] link router->dst GIÙ";  cexec router "ip link set dev $BNECK_IF down"; }
-link_up()   { echo "   [evento] link router->dst SU";   cexec router "ip link set dev $BNECK_IF up";   }
+link_down() { echo "   [event] router->dst link DOWN"; cexec router "ip link set dev $BNECK_IF down"; }
+link_up()   { echo "   [event] router->dst link UP";   cexec router "ip link set dev $BNECK_IF up";   }
 
 # ── Scenario 1: single bottleneck overload ────────────────────────────────────
 scenario_1() {
@@ -49,37 +49,37 @@ scenario_1() {
   srv 5201; srv 5202; sleep 1
   cexec_bg src0 "iperf3 -u -c $DST -p 5201 -b 8M -t 60 > /tmp/s1_src0.txt 2>&1"
   cexec    src1 "iperf3 -u -c $DST -p 5202 -b 5M -t 60"
-  echo "-- flusso src0 --"; cexec src0 "cat /tmp/s1_src0.txt" || true
+  echo "-- flow src0 --"; cexec src0 "cat /tmp/s1_src0.txt" || true
 }
 
 # ── Scenario 2: flash crowd ───────────────────────────────────────────────────
 scenario_2() {
-  echo "== Scenario 2 - Flash Crowd (surge da t=20 a t=50) =="
+  echo "== Scenario 2 - Flash Crowd (surge from t=20 to t=50) =="
   srv 5201; srv 5202; sleep 1
-  # flusso normale per tutta la durata
+  # normal flow for the whole run
   cexec_bg src0 "iperf3 -u -c $DST -p 5201 -b 4M -t 80 > /tmp/s2_src0.txt 2>&1"
-  # flusso surge: parte a t=20, dura 30s (fino a t=50)
+  # surge flow: starts at t=20, lasts 30s (until t=50)
   ( sleep 20; cexec src1 "iperf3 -u -c $DST -p 5202 -b 6M -t 30" ) &
   wait
-  echo "-- flusso normale src0 --"; cexec src0 "cat /tmp/s2_src0.txt" || true
+  echo "-- normal flow src0 --"; cexec src0 "cat /tmp/s2_src0.txt" || true
 }
 
 # ── Scenario 3: bandwidth degradation ─────────────────────────────────────────
 scenario_3() {
-  echo "== Scenario 3 - Bandwidth Degradation (10->4 a t=30, 10 a t=60) =="
+  echo "== Scenario 3 - Bandwidth Degradation (10->4 at t=30, 10 at t=60) =="
   srv 5201; srv 5202; sleep 1
   cexec_bg src0 "iperf3 -u -c $DST -p 5201 -b 7M -t 80 > /tmp/s3_src0.txt 2>&1"
   cexec_bg src1 "iperf3 -u -c $DST -p 5202 -b 2M -t 80 > /tmp/s3_src1.txt 2>&1"
   ( sleep 30; set_bottleneck_rate 4mbit ) &
   ( sleep 60; set_bottleneck_rate 10mbit ) &
   sleep 82
-  set_bottleneck_rate 10mbit   # ripristino di sicurezza
-  echo "-- flusso src0 --"; cexec src0 "cat /tmp/s3_src0.txt" || true
+  set_bottleneck_rate 10mbit   # safety restore
+  echo "-- flow src0 --"; cexec src0 "cat /tmp/s3_src0.txt" || true
 }
 
 # ── Scenario 4: link failure & recovery ───────────────────────────────────────
 scenario_4() {
-  echo "== Scenario 4 - Link Failure & Recovery (giù t=30, su t=55) =="
+  echo "== Scenario 4 - Link Failure & Recovery (down t=30, up t=55) =="
   srv 5201; srv 5202; sleep 1
   cexec_bg src0 "iperf3 -u -c $DST -p 5201 -b 6M -t 90 > /tmp/s4_src0.txt 2>&1"
   cexec_bg src1 "iperf3 -u -c $DST -p 5202 -b 3M -t 90 > /tmp/s4_src1.txt 2>&1"
@@ -87,7 +87,7 @@ scenario_4() {
   ( sleep 55; link_up; set_bottleneck_rate 10mbit ) &
   sleep 92
   link_up
-  echo "-- flusso src0 --"; cexec src0 "cat /tmp/s4_src0.txt" || true
+  echo "-- flow src0 --"; cexec src0 "cat /tmp/s4_src0.txt" || true
 }
 
 # ── Scenario 5: persistent overload ───────────────────────────────────────────
@@ -97,16 +97,16 @@ scenario_5() {
   cexec_bg src0 "iperf3 -u -c $DST -p 5201 -b 7M -t 60 > /tmp/s5_src0.txt 2>&1"
   cexec_bg src1 "iperf3 -u -c $DST -p 5202 -b 5M -t 60 > /tmp/s5_src1.txt 2>&1"
   cexec    src2 "iperf3 -u -c $DST -p 5203 -b 3M -t 60"
-  echo "-- flusso src0 --"; cexec src0 "cat /tmp/s5_src0.txt" || true
-  echo "-- flusso src1 --"; cexec src1 "cat /tmp/s5_src1.txt" || true
+  echo "-- flow src0 --"; cexec src0 "cat /tmp/s5_src0.txt" || true
+  echo "-- flow src1 --"; cexec src1 "cat /tmp/s5_src1.txt" || true
 }
 
-# ── Scenario 6: mixed traffic con priorità ────────────────────────────────────
-# Riconfigura il collo di bottiglia (router:$BNECK_IF) con HTB a 3 classi di
-# priorità e filtri per DSCP. Le sorgenti marcano il traffico con iperf3 -S:
-#   control   -> DSCP CS6 (0xc0)  classe 1:10 (prio 0, protetta)
-#   telemetry -> DSCP CS2 (0x40)  classe 1:20 (prio 1)
-#   video     -> best-effort      classe 1:30 (prio 2, default)
+# ── Scenario 6: mixed traffic with priority ───────────────────────────────────
+# Reconfigures the bottleneck (router:$BNECK_IF) with a 3-class-priority HTB
+# and DSCP filters. The sources mark the traffic with iperf3 -S:
+#   control   -> DSCP CS6 (0xc0)  class 1:10 (prio 0, protected)
+#   telemetry -> DSCP CS2 (0x40)  class 1:20 (prio 1)
+#   video     -> best-effort      class 1:30 (prio 2, default)
 setup_priority_qdisc() {
   cexec router "
     tc qdisc replace dev $BNECK_IF root handle 1: htb default 30
@@ -122,22 +122,22 @@ setup_priority_qdisc() {
   "
 }
 scenario_6() {
-  echo "== Scenario 6 - Mixed Telemetry & Video (priorità: control > telemetry > video) =="
-  echo ">> Riconfiguro il collo di bottiglia con HTB + filtri DSCP..."
+  echo "== Scenario 6 - Mixed Telemetry & Video (priority: control > telemetry > video) =="
+  echo ">> Reconfiguring the bottleneck with HTB + DSCP filters..."
   setup_priority_qdisc
   srv 5201; srv 5202; srv 5203; sleep 1
   # video (best-effort, pri 2)
   cexec_bg src0 "iperf3 -u -c $DST -p 5201 -b 5M -S 0x00 -t 60 > /tmp/s6_video.txt 2>&1"
   # telemetry (CS2, pri 1)
   cexec_bg src1 "iperf3 -u -c $DST -p 5202 -b 4M -S 0x40 -t 60 > /tmp/s6_telemetry.txt 2>&1"
-  # control (CS6, pri 0, protetto)
+  # control (CS6, pri 0, protected)
   cexec    src2 "iperf3 -u -c $DST -p 5203 -b 2M -S 0xc0 -t 60"
-  echo "-- VIDEO (priorità bassa) --";     cexec src0 "cat /tmp/s6_video.txt"     || true
-  echo "-- TELEMETRY (priorità media) --"; cexec src1 "cat /tmp/s6_telemetry.txt" || true
-  echo ">> Nota: per ripristinare il drop-tail semplice ridai './deploy.sh single_bottleneck'."
+  echo "-- VIDEO (low priority) --";     cexec src0 "cat /tmp/s6_video.txt"     || true
+  echo "-- TELEMETRY (medium priority) --"; cexec src1 "cat /tmp/s6_telemetry.txt" || true
+  echo ">> Note: to restore the plain drop-tail, run './deploy.sh single_bottleneck' again."
 }
 
 case "$SCN" in
   1|2|3|4|5|6) "scenario_${SCN}" ;;
-  *) echo "Uso: $0 <1-6>   (richiede './deploy.sh single_bottleneck')" >&2; exit 1 ;;
+  *) echo "Usage: $0 <1-6>   (requires './deploy.sh single_bottleneck')" >&2; exit 1 ;;
 esac
